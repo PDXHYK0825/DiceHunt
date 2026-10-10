@@ -1,0 +1,19 @@
+# ============================================================
+#  运行时依赖 —— 故意为空
+# ============================================================
+#  控制台版本（必做部分）是**纯 Python 标准库**实现：
+#    dataclasses / enum / collections / types / hashlib / random / typing / pathlib ...
+#  因此本文件不声明任何依赖，`pip install -r requirements.txt` 是空操作。
+#
+#  运行方式（无需先安装任何东西）：
+#    cd Project
+#    set PYTHONPATH=src          # PowerShell: $env:PYTHONPATH="src"
+#    python -m treasure_game
+#
+#  说明：
+#  - 禁止 numpy / pytest 等第三方包进入 src/treasure_game 的运行时代码
+#    （见 Project/docs/06-interface-freeze.md §0）。
+#  - GUI（选做加分项，Project/docs/spec.md 三-B）按需自行安装 PyQt6；
+#    它不是必做交付物的一部分，故不写入运行时依赖，且 gui.py 必须延迟导入。
+#  - 测试期依赖见 requirements-dev.txt；本仓库自带 .pylibs 内的 pytest，
+#    `run_tests.cmd` 会自动注入，无需全局安装。

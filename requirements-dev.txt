@@ -1,0 +1,5 @@
+# 开发/测试依赖（仅跑测试与实验需要，运行控制台不需要任何第三方包）。
+# 仓库根已自带 .pylibs/pytest（9.1.1），run_tests.cmd 会把它注入 PYTHONPATH，
+# 所以本地**不必**执行本文件的安装；需要独立环境时才用：
+#   python -m pip install -r Project/requirements-dev.txt
+pytest>=8

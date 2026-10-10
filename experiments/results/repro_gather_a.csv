@@ -1,0 +1,4 @@
+map_seed,dice_seed,map_id,mode,depth,K,partition_enabled,human_model_id,score_a,score_b,winner,draw_timeout,turns,trap_steps_a,trap_steps_b,battles,ai_calls,ai_elapsed_ns,cache_hits,cache_misses
+42,100045,881d9101c0640430,EASY,3,24,False,VIEW_HEURISTIC:GATHER:v1,12,2,A,False,8,0,1,0,7,1795300,0,0
+42,100045,881d9101c0640430,NORMAL,3,24,True,VIEW_HEURISTIC:GATHER:v1,10,6,A,False,6,0,0,0,5,174953700,1030,1676
+42,100045,881d9101c0640430,HARD,3,24,True,VIEW_HEURISTIC:GATHER:v1,10,6,A,False,6,0,0,0,5,174487300,1030,1676
