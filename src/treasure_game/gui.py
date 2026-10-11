@@ -1057,6 +1057,7 @@ def _build_qt_classes() -> dict[str, type]:
             #: 渲染过的帧 / 弹窗记录 / 骰子投点记录（测试与报告用）
             self.frames: list[Frame] = []
             self.popups: list[Popup] = []
+            self.battle_count = 0
             self.dice_rolls: list[int] = []
             #: 动画计划（每一步的记录，测试用）
             self.animation_steps: list[str] = []
@@ -1444,6 +1445,7 @@ def _build_qt_classes() -> dict[str, type]:
             self._game_running = True
             self.frames.clear()
             self.popups.clear()
+            self.battle_count = 0
             self.dice_rolls.clear()
             self.animation_steps.clear()
             self._set_game_controls_enabled(False)
@@ -1609,7 +1611,9 @@ def _build_qt_classes() -> dict[str, type]:
                 raise ValueError(
                     f"_on_battle 只接受 GameEvent 或 BattleResult，收到 {type(result).__name__}"
                 )
-            self._show_popup("BATTLE", "对战胜负", text)
+            self.battle_count += 1
+            title = f"对战胜负（第 {self.battle_count} 次）"
+            self._show_popup("BATTLE", title, text)
 
         # -------------------------------------------------------------- 动画
         def _animate(self, frame: Frame) -> None:
