@@ -1146,7 +1146,7 @@ def _build_qt_classes() -> dict[str, type]:
             self.save_button = QPushButton("保存 txt 地图", box)
             self.save_button.clicked.connect(lambda: self.on_save())
             self.start_button = QPushButton("开始对局（人机）", box)
-            self.start_button.clicked.connect(self.on_start_game)
+            self.start_button.clicked.connect(lambda _checked=False: self.on_start_game())
             self.demo_button = QPushButton("机器对机器演示", box)
             self.demo_button.clicked.connect(self.on_start_machine_demo)
             self.abort_button = QPushButton("中止对局", box)
