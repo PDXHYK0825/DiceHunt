@@ -2,7 +2,9 @@
 
 二维栅格地图上的寻宝对抗仿真平台：人工玩家与机器 AI 轮流投骰子（1–6，得到本回合最大**有效**移动步数 N），
 输入方向序列移动，撞障碍物不消耗步数，踏入宝藏/陷阱立刻结算；**回合移动全部结束后**终点坐标重合才触发对战，
-地图宝藏被拾取完即终局。支持三种模式、三种对局形态，并附带批量随机地图仿真与算法对比。
+对战有胜负时，赢家留在原地，输家等概率随机传送到全图当前空白格（排除赢家位置、墙、宝藏和陷阱）；
+平局或全图没有可用空白格时位置不变。地图宝藏被拾取完即终局。
+支持三种模式、三种对局形态，并附带批量随机地图仿真与算法对比。
 
 | 模式 | 机器 AI | 陷阱可见性（人工视角） |
 | --- | --- | --- |
@@ -184,12 +186,13 @@ from treasure_game.path_module import PathModule
 * `GameState.position_of(seat)` / `score_of(seat)` —— 座位归一化常用小工具。
 * `MoveResult.events` 语义：每条**成功**移动产生一条 `MOVE`；同一步内若触发资源，紧跟 `TREASURE`/`TRAP`；
   撞墙产生 `BLOCKED`（`position` = 未移动的当前坐标，恒在界内，便于 UI 直接渲染）。
-* `PathModule` 四个静态方法：
+* `PathModule` 五个静态方法：
 
 | 方法 | 语义 |
 | --- | --- |
 | `sim_player_multi_step(true_map, start_pos, move_seq, max_valid_step, actor=Seat.A) -> MoveResult` | 唯一移动内核：撞墙不耗步、资源立刻结算、走满 N 即停 |
 | `get_adjacent_empty(true_map, origin) -> Position \| None` | 邻序 上/左/下/右 的第一个"底图 0 且从未布置资源"的格子 |
+| `get_any_empty(true_map, exclude=()) -> Position \| None` | 从全图当前空白格中等概率随机选择落点，排除指定坐标 |
 | `bfs_distances(true_map, start) -> dict[Position, int]` | 只以底图墙为障碍；起点 0；不可达**缺键** |
 | `bfs_path(true_map, start, target) -> tuple[Direction, ...] \| None` | 同权最短路；`start==target` 返回 `()`；不可达 `None` |
 
@@ -205,7 +208,8 @@ from treasure_game.path_module import PathModule
 > 非法输入（`max_valid_step < 0`、起点越界/是墙、序列含非 `Direction`）抛 `ValueError`；传 `ViewMap` 抛 `TypeError`。
 > **AI/分治内部推演必须调用这同一个内核**，预测的 `root_final_pos`/`root_score_delta` 必须等于把返回序列重放的结果（ADR-03）。
 
-邻序遍历固定 **上、左、下、右**，它同时决定 BFS 并列最短路的取舍和败方推开的首选方向，因此结果确定、可复现。
+邻序遍历固定 **上、左、下、右**，决定 BFS 并列最短路的取舍。对战败方通过
+`get_any_empty(true_map, exclude=(胜方位置,))` 从全图当前空白格中随机选择落点，不受邻序限制。
 
 ## 9. 关键不变量
 
@@ -227,7 +231,7 @@ from treasure_game.path_module import PathModule
 | 资源单次触发/陷阱永久暴露 | `test_resources_trigger_once_and_trap_stays_revealed` | `TREASURE`/`TRAP` 各一次，重复踏入不加分 |
 | 真值图不可变 | `test_true_map_is_deeply_immutable_and_result_returns_new_object` | `MappingProxyType` 写入报错、入参内容不变 |
 | BFS 与邻序 | `test_bfs_distances_...`、`test_bfs_path_shortest_with_frozen_neighbor_order` | 不可达缺键/返回 `None`、并列最短路按冻结邻序 |
-| 败方推开候选 | `test_get_adjacent_empty_skips_cells_that_ever_held_resources` | 曾放资源的格子不算空地 |
+| 败方随机传送 | `test_loser_b_teleported_to_random_empty_with_winner_unchanged` | 全图空白格均可被选中，赢家不动 |
 | 性质测试 | `test_property_random_walks_match_reference_model` | 固定种子 300 局随机走位与独立参考模型逐项互证 |
 
 完整测试计划见 [`Project/docs/04-test-plan.md`](docs/04-test-plan.md)。

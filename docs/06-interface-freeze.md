@@ -288,8 +288,9 @@ class Simulator:
    已触发陷阱显示原始负值；AI 永远读 `TrueMap`。
 7. **对战只在回合终点**：`Simulator` 每回合移动全部结束后调用一次 `BattleModule.trigger_battle`；
    途中经过对手不触发；同回合不得重复结算。
-8. **对战结算**：`pos_a != pos_b` → `triggered=False` 且分数位置全不变；相等且同分 → 平局不推开；
-   分数不等 → 胜方 `+win_score`、败方 `-win_score`，败方推往上/左/下/右第一个"底图 0 且从未布置资源"的空格，
+8. **对战结算**（按最新需求更新）：`pos_a != pos_b` → `triggered=False` 且分数位置全不变；相等且同分 → 平局不传送；
+   分数不等 → 胜方 `+win_score`、败方 `-win_score`；胜方留在原地，败方等概率随机传送到全图当前空白格。
+   候选排除胜方位置、墙、剩余宝藏、未触发及已暴露陷阱；已拾取宝藏的格子可作为落点。
    无候选则原地不动但分数照改。
 9. **终局**：`remaining_treasures` 为空即终局；拾取最后一枚宝藏的回合**先做终点对战再判定终局**；
    `turn_index >= max_turns` 仍有宝藏 → `draw_timeout=True` 且 `winner=None`。

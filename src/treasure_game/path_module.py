@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import random
 from collections import deque
 from collections.abc import Iterable
 
@@ -32,7 +33,7 @@ from treasure_game.models import (
 
 __all__ = ["PathModule", "NEIGHBOR_ORDER"]
 
-#: 邻序遍历顺序（冻结）：上、左、下、右。BFS 并列最短路取舍与败方推开都依赖它。
+#: 邻序遍历顺序（冻结）：上、左、下、右。BFS 并列最短路取舍依赖它。
 NEIGHBOR_ORDER: tuple[Direction, ...] = (
     Direction.UP,
     Direction.LEFT,
@@ -243,15 +244,17 @@ class PathModule:
                 continue
             return candidate
         return None
+
     @staticmethod
     def get_any_empty(
         true_map: TrueMap,
         *,
         exclude: tuple[Position, ...] = (),
     ) -> Position | None:
-        """按从上到下、从左到右的顺序，返回全图第一个当前空白格。"""
+        """从全图当前空白格中等概率随机选一个，无候选返回 ``None``。"""
         current_map = require_true_map(true_map)
         excluded = set(exclude)
+        candidates = []
 
         for row in range(current_map.height):
             for col in range(current_map.width):
@@ -273,9 +276,9 @@ class PathModule:
                 if candidate in current_map.revealed_traps:
                     continue
 
-                return candidate
+                candidates.append(candidate)
 
-        return None
+        return random.choice(candidates) if candidates else None
 
     # ------------------------------------------------------------------
     # BFS（连通性 / 距离 / 最短路）

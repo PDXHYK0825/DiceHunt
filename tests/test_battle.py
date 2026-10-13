@@ -1,7 +1,7 @@
 """``Project/tests/test_battle.py`` —— BattleModule 终点对战结算（W1-03）。
 
 覆盖 ``docs/04-test-plan.md`` 用例 5（``test_spec_case_5_boxed_loser_still_loses_points``）与
-06 §4.8 的全部边界：未重合不结算、同分平局不推开、败方推开顺序、无空位原地不动但分数照改、
+对战规则的全部边界：未重合不结算、同分平局不传送、败方全图随机传送、无空位原地不动但分数照改、
 不消耗资源、不递归触发、``ViewMap`` 误入抛 ``TypeError``、坏坐标抛 ``ValueError``。
 """
 
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+import random
 
 import pytest
 
@@ -18,7 +19,7 @@ from treasure_game.models import GameMode, Position, Seat, TrueMap
 
 # spec 用例 5：3×3，中心 (1,1) 为空地，四邻全为墙
 BOXED_ROWS = ((1, 1, 1), (1, 0, 1), (1, 1, 1))
-# 全空地，用于验证败方推开顺序（上 → 左 → 下 → 右）
+# 全空地，用于验证败方全图随机传送
 OPEN_ROWS = ((0, 0, 0), (0, 0, 0), (0, 0, 0))
 CENTER = Position(1, 1)
 
@@ -125,54 +126,91 @@ def test_adjacent_but_not_overlapping_is_not_triggered():
 
 
 # =========================================================================== #
-# 败方推开
+# 败方随机传送
 # =========================================================================== #
 
 
-def test_loser_b_pushed_to_first_adjacent_empty():
-    """邻序固定 上 → 左 → 下 → 右，因此 B 被推到 (0,1)。"""
+@pytest.mark.parametrize(
+    "target", [Position(r, c) for r in range(3) for c in range(3) if (r, c) != (1, 1)]
+)
+def test_loser_b_teleported_to_random_empty_with_winner_unchanged(monkeypatch, target):
+    """全图每个空白格（含非相邻格）都参与随机抽取，胜方保持原位。"""
     true_map = _true_map(OPEN_ROWS)
+    candidates = []
+
+    def choose(positions):
+        candidates.extend(positions)
+        return target
+
+    monkeypatch.setattr(random, "choice", choose)
 
     result = BattleModule.trigger_battle(true_map, CENTER, CENTER, 10, 5)
 
     assert (result.score_a, result.score_b) == (15, 0)
     assert result.pos_a == CENTER  # 胜方不动
-    assert result.pos_b == Position(0, 1)
+    assert result.pos_b == target
+    assert set(candidates) == {
+        Position(r, c) for r in range(3) for c in range(3) if (r, c) != (1, 1)
+    }
 
 
-def test_loser_a_pushed_when_b_wins():
+def test_loser_a_teleported_when_b_wins(monkeypatch):
     true_map = _true_map(OPEN_ROWS)
+    monkeypatch.setattr(random, "choice", lambda positions: positions[-1])
 
     result = BattleModule.trigger_battle(true_map, CENTER, CENTER, 5, 12)
 
     assert (result.score_a, result.score_b) == (0, 17)  # B 胜：B +5、A -5
-    assert result.pos_a == Position(0, 1)
+    assert result.pos_a == Position(2, 2)
     assert result.pos_b == CENTER
     assert result.events[0].message == "触发对战：B +5 分，A -5 分"
 
 
-def test_push_skips_cells_that_once_held_resources():
-    """D4/01 §2：候选必须是"底图 0 且从未布置资源"。
-
-    (0,1) 是已暴露的陷阱格、(1,0) 是已拾取的宝藏格 → 两者都跳过，落到 (2,1)。
-    """
+def test_teleport_excludes_walls_resources_and_winner_but_allows_collected_treasure(monkeypatch):
+    """排除所有仍显示为墙/资源的格子，已拾取宝藏的格子已是空白格。"""
     true_map = _true_map(
-        OPEN_ROWS,
-        treasures=((1, 0, 4),),
-        traps=((0, 1, -2),),
-        remaining=frozenset(),  # 宝藏已拾取
-        active=frozenset(),  # 陷阱已触发
+        ((1, 0, 0), (0, 0, 0), (0, 0, 0)),
+        treasures=((1, 0, 4), (0, 2, 2)),
+        traps=((0, 1, -2), (1, 2, -2)),
+        remaining={Position(0, 2)},
+        active={Position(1, 2)},
         revealed={Position(0, 1)},
     )
+    candidates = []
+
+    def choose(positions):
+        candidates.extend(positions)
+        return Position(1, 0)
+
+    monkeypatch.setattr(random, "choice", choose)
 
     result = BattleModule.trigger_battle(true_map, CENTER, CENTER, 3, 8)
 
     assert (result.score_a, result.score_b) == (-2, 13)
-    assert result.pos_a == Position(2, 1)
+    assert result.pos_a == Position(1, 0)
     assert result.pos_b == CENTER
+    assert set(candidates) == {Position(1, 0), Position(2, 0), Position(2, 1), Position(2, 2)}
 
 
-def test_loser_stays_when_no_adjacent_empty_but_scores_still_change():
+def test_repeated_battles_can_choose_different_empty_cells(monkeypatch):
+    true_map = _true_map(OPEN_ROWS)
+    monkeypatch.setattr(random, "choice", random.Random(12345).choice)
+    destinations = {
+        BattleModule.trigger_battle(true_map, CENTER, CENTER, 10, 5).pos_b
+        for _ in range(100)
+    }
+    assert destinations == {
+        Position(r, c) for r in range(3) for c in range(3) if (r, c) != (1, 1)
+    }
+
+
+def test_loser_teleports_when_adjacent_cells_are_walls():
+    true_map = _true_map(((0, 1, 1), (1, 0, 1), (1, 1, 1)))
+    result = BattleModule.trigger_battle(true_map, CENTER, CENTER, 10, 5)
+    assert (result.pos_a, result.pos_b) == (CENTER, Position(0, 0))
+
+
+def test_loser_stays_when_no_empty_cell_but_scores_still_change():
     true_map = _true_map(BOXED_ROWS)
     result = BattleModule.trigger_battle(true_map, CENTER, CENTER, -1, 7)
     assert result.triggered is True
@@ -186,7 +224,7 @@ def test_custom_win_score_is_used_in_scores_and_message():
     result = BattleModule.trigger_battle(true_map, CENTER, CENTER, 3, 9, win_score=3)
 
     assert (result.score_a, result.score_b) == (0, 12)
-    assert result.pos_a == Position(0, 1)  # A 是败方
+    assert result.pos_a != CENTER and result.pos_b == CENTER  # A 是败方
     assert result.events[0].message == "触发对战：B +3 分，A -3 分"
 
 
@@ -195,7 +233,7 @@ def test_zero_win_score_still_triggers_battle():
     result = BattleModule.trigger_battle(true_map, CENTER, CENTER, 2, 1, win_score=0)
     assert result.triggered is True
     assert (result.score_a, result.score_b) == (2, 1)
-    assert result.pos_b == Position(0, 1)
+    assert result.pos_a == CENTER and result.pos_b != CENTER
 
 
 def test_negative_scores_compare_by_original_values():

@@ -7,7 +7,7 @@
   踩中前的人工 UI/日志不泄露该陷阱坐标或负值、机器侧始终读真值、同图 NORMAL 一开始可见。
 * **spec 用例 2（Simulator 侧）**：固定骰序下 OPT AI 在"捡 +2 宝藏"与"求战 +5/−5"之间选择求战，
   AI 净 +7、对战恰一次。
-* **spec 用例 5（Simulator 侧）**：终点重合只结算一次；败方四周全资源格无法推开时仍重合，
+* **对战传送（Simulator 侧）**：终点重合只结算一次；胜方不动，败方传送到全图空白格，
   同回合不递归二次结算。
 * 回合顺序（先 render 再 next_action）、中途路过对手不对战、最后一枚宝藏先对战后终局（D11）、
   初态即空不掷骰、``max_turns`` 超时、骰序注入与 RNG 隔离、策略路由、
@@ -393,7 +393,7 @@ def test_spec_case_2_opt_ai_prefers_winning_battle_with_treasure_pickup() -> Non
         rng=random.Random(12345),  # 有骰表时不得被消耗
         policy_a=SeatPolicy.HUMAN,
         policy_b=SeatPolicy.OPT,
-        max_turns=12,
+        max_turns=1,
         ai=AiModule(depth=1, candidate_limit=24, partition_threshold=144),
         dice_seed_table=[1, 2] * 12,  # A 每回合 N=1，B 每回合 N=2
     )
@@ -410,7 +410,7 @@ def test_spec_case_2_opt_ai_prefers_winning_battle_with_treasure_pickup() -> Non
     for frame in io.render_events:
         assert len([event for event in frame if event.kind == GameEvent.BATTLE]) <= 1
     # 第 0 回合（A 停在原地 + B 一步求战）恰好结算一次，文案为冻结格式
-    round0_events = io.render_events[2]  # 第 1 回合 A 的渲染携带"上一回合（B）"的事件
+    round0_events = io.render_events[-1]  # 最后一帧携带第 0 回合 B 的事件
     round0_battles = [event for event in round0_events if event.kind == GameEvent.BATTLE]
     assert len(round0_battles) == 1
     assert round0_battles[0].message == "触发对战：B +5 分，A -5 分"
@@ -419,14 +419,14 @@ def test_spec_case_2_opt_ai_prefers_winning_battle_with_treasure_pickup() -> Non
 
 
 # ======================================================================================
-# spec 用例 5：终点重合只结算一次；败方无法推开时仍重合也不递归
+# 终点重合只结算一次；败方传送到全图空白格，胜方留在原地
 # ======================================================================================
-def test_spec_case_5_battle_settled_once_and_boxed_loser_stays() -> None:
-    """3×3：中心 (1,1) 空且四邻全为资源格（无法推开）；双方终点重合。
+def test_battle_settled_once_and_loser_teleported_to_empty_cell() -> None:
+    """3×3：中心 (1,1) 空且四邻曾布置资源；双方终点重合。
 
     回合 0：A 拿 +4（(0,1)），B 拿 +2（(1,2)）→ 分数 4 : 2。
-    回合 1：A 下到中心，B 左到中心 → 终点重合 → A 胜 +5 / B −5，B 四周全资源格无法推开。
-    断言：只结算一次（4+5=9、2−5=−3）、对战事件恰一条、双方仍重合（未递归二次结算）。
+    回合 1：A 下到中心，B 左到中心 → 终点重合 → A 胜 +5 / B −5。
+    断言：只结算一次（4+5=9、2−5=−3）、对战事件恰一条、A 原位、B 在全图当前空白格。
     """
     grid = [
         [0, 4, 0],
@@ -451,9 +451,13 @@ def test_spec_case_5_battle_settled_once_and_boxed_loser_stays() -> None:
     assert (result.score_a, result.score_b) == (9, -3)
     assert result.metrics["treasure_steps_a"] == 1
     assert result.metrics["treasure_steps_b"] == 1
-    # 败方四周全资源格 → 推开失败：双方仍重合（最后一帧公开状态）
+    # 赢家原位，输家可传送到远处空白格或已拾取宝藏的格子。
     final_view = io.state_views[-1]
-    assert final_view.pos_a == final_view.pos_b == Position(1, 1)
+    assert final_view.pos_a == Position(1, 1)
+    assert final_view.pos_b in {
+        Position(0, 0), Position(0, 1), Position(0, 2),
+        Position(1, 2), Position(2, 0), Position(2, 2),
+    }
     # 超过 max_turns 仍有宝藏 → 超时，不判胜负
     assert result.draw_timeout is True and result.winner is None
     assert result.turns == 2

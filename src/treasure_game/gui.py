@@ -1082,7 +1082,7 @@ def _build_qt_classes() -> dict[str, type]:
 
         # -------------------------------------------------------------- 界面构建
         def _build_ui(self, params: typing.Sequence[int]) -> None:
-            self.setWindowTitle("对战地图寻宝策略分析平台 · GUI（spec 第三节 B 加分项）")
+            self.setWindowTitle("对战地图寻宝策略分析平台 ")
             central = QWidget(self)
             root = QVBoxLayout(central)
             root.addWidget(self._build_toolbar(params))
