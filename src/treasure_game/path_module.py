@@ -243,6 +243,39 @@ class PathModule:
                 continue
             return candidate
         return None
+    @staticmethod
+    def get_any_empty(
+        true_map: TrueMap,
+        *,
+        exclude: tuple[Position, ...] = (),
+    ) -> Position | None:
+        """按从上到下、从左到右的顺序，返回全图第一个当前空白格。"""
+        current_map = require_true_map(true_map)
+        excluded = set(exclude)
+
+        for row in range(current_map.height):
+            for col in range(current_map.width):
+                candidate = Position(row, col)
+
+                # 排除玩家当前位置，避免败方传送到胜方所在格
+                if candidate in excluded:
+                    continue
+
+                # 墙格不是空地
+                if current_map.terrain[row][col] != 0:
+                    continue
+
+                # 排除当前仍在地图上的宝藏和陷阱
+                if candidate in current_map.remaining_treasures:
+                    continue
+                if candidate in current_map.active_traps:
+                    continue
+                if candidate in current_map.revealed_traps:
+                    continue
+
+                return candidate
+
+        return None
 
     # ------------------------------------------------------------------
     # BFS（连通性 / 距离 / 最短路）

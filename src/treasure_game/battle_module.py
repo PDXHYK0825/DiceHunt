@@ -7,8 +7,7 @@
 2. ``pos_a != pos_b`` → ``triggered=False``，位置与分数**完全不变**。
 3. 重合且同分 → 平局：``triggered=True``，分数、位置均不变，不推开。
 4. 重合且分数不等 → **先按原始分数比较**：胜者 ``+win_score``、败者 ``-win_score``；
-   败方再用 ``PathModule.get_adjacent_empty`` 推到相邻合法空地（上/左/下/右第一个
-   "底图 0 且从未布置资源"的格子），无候选则原地不动但分数照改。
+   败方随机传送到全图当前无墙、无宝藏、无陷阱的空格；无候选则原地不动但分数照改。
 
 本模块不消耗宝藏/陷阱、不递归触发第二次对战、不修改 ``TrueMap``。
 """
@@ -114,8 +113,8 @@ class BattleModule:
             new_score_a, new_score_b = a_score - win_score, b_score + win_score
             loser_is_b = False
 
-        # 败方推开：只看静态从未布置资源的相邻空地；无候选则原地不动（spec 用例 5）。
-        push_target = PathModule.get_adjacent_empty(current_map, a_pos)
+        # 败方随机传送到全图当前空白格；没有空格时原地不动。
+        push_target = PathModule.get_any_empty(current_map, exclude=(a_pos,))
         new_pos_a, new_pos_b = a_pos, b_pos
         if push_target is not None:
             if loser_is_b:
