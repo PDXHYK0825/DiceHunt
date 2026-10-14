@@ -381,6 +381,26 @@ class GuiIO:
         """更新座位显示名（与 ``ConsoleIO.set_seat_labels`` 同口径）。"""
         self._seat_labels.update(labels)
 
+    def ai_calculation(
+        self, state_view: PublicStateView, details: tuple[str, ...] | None
+    ) -> None:
+        """转发机器本轮计算状态与明细，输入只使用公开状态。"""
+        seat = state_view.turn
+        name = self._seat_labels.get(seat, seat.value)
+        summary = f"第 {state_view.turn_index + 1} 轮 · {seat.value}（{name}）AI 计算过程"
+        pos = state_view.pos_a if seat is Seat.A else state_view.pos_b
+        inputs = (
+            f"本轮输入：骰子 N={state_view.dice_N}；起点第 {pos.row + 1} 行第 {pos.col + 1} 列；"
+            f"比分 A={state_view.score_a}、B={state_view.score_b}；"
+            f"剩余宝藏 {state_view.remaining_treasure_count}。"
+        )
+        lines = (inputs,) + (details if details is not None else ("正在计算可选行动，完成后更新本条记录。",))
+        if details is not None:
+            self.transcript.extend((summary, *lines))
+        callback = getattr(self._sink, "ai_calculation", None)
+        if callable(callback):
+            callback(summary, lines, details is None)
+
     # ------------------------------------------------------------------ 工具
     def _normalize(self, raw: typing.Any, dice_N: int | None = None) -> tuple[Direction, ...]:
         """把脚本项规范化成 ``tuple[Direction, ...]``；接受字符串/``Direction`` 序列。"""

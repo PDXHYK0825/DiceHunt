@@ -33,6 +33,7 @@ from treasure_game.greedy_ai import GreedyAI
 from treasure_game.human_policy import DEFAULT_HUMAN_MODEL_STRATEGY
 from treasure_game.models import (
     Direction,
+    GameMode,
     GameState,
     IllegalStateError,
     Position,
@@ -111,6 +112,7 @@ class AiModule:
         "_local_seat",
         "_local_depth_drop",
         "_local_candidate_divisor",
+        "_calculation_details",
     )
 
     def __init__(
@@ -179,6 +181,7 @@ class AiModule:
         self._local_seat: Seat = Seat.B
         self._local_depth_drop = local_depth_drop
         self._local_candidate_divisor = local_candidate_divisor
+        self._calculation_details: tuple[str, ...] = ()
 
     # ------------------------------------------------------------------
     # 配置查询（追加 API）
@@ -226,6 +229,7 @@ class AiModule:
             depth=0,
         )
         self._root_utility = None
+        self._record_calculation(current_state)
         return tuple(sequence)
 
     # ------------------------------------------------------------------
@@ -267,11 +271,13 @@ class AiModule:
             )
             # 分治合并的即时 U（单层评分口径，非全树搜索值）。
             self._root_utility = float(report.merged_u)
+            self._record_calculation(current_state, self._partition.root_candidates())
             return tuple(sequence)
 
         sequence = self._opt.decide(current_state, steps, actor)
         self._diagnostics = self._opt.diagnostics()
         self._root_utility = self._opt.root_utility()
+        self._record_calculation(current_state, self._opt.root_candidates())
         return tuple(sequence)
 
     def _solve_local(
@@ -321,6 +327,71 @@ class AiModule:
     # ------------------------------------------------------------------
     # 诊断（追加 API + 冻结 API）
     # ------------------------------------------------------------------
+    def get_calculation_details(self) -> tuple[str, ...]:
+        """最近一次决策的实际计算记录；困难模式不公开隐藏信息相关的估值。"""
+        self.get_diagnostics()
+        return self._calculation_details
+
+    def _record_calculation(
+        self,
+        state: GameState,
+        candidates: tuple[tuple[tuple[Direction, ...], float, bool], ...] = (),
+    ) -> None:
+        diagnostics = self.get_diagnostics()
+        hidden = state.mode is GameMode.HARD
+
+        def moves(sequence: tuple[Direction, ...]) -> str:
+            return " ".join(direction.value for direction in sequence) or "end（停留）"
+
+        lines = [f"算法：{diagnostics.algorithm}；方向 w/a/s/d = 上/左/下/右。"]
+        if diagnostics.algorithm == ALGORITHM_GREEDY:
+            lines.append("计算方法：BFS 求可达宝藏距离，按分值/距离比较；同分优先分值高、距离短、坐标小。")
+            lines.extend(self._greedy.calculation_details())
+        else:
+            limit = str(self._config.candidate_limit) if self._config.candidate_limit > 0 else "不限"
+            lines.append(
+                f"搜索深度 {diagnostics.depth}；每个节点候选上限 {limit}；"
+                f"对手模型 {self._config.human_model} / {self._config.human_model_strategy}；"
+                "未来骰子按 1～6 等概率推演。"
+            )
+            lines.append(
+                f"α-β 剪枝：{'开启' if self._config.use_pruning else '关闭'}；"
+                f"记忆化缓存：{'开启' if self._config.use_cache else '关闭'}；"
+                f"机会节点剪枝：{'开启' if self._config.use_pruning and self._config.chance_pruning else '关闭'}。"
+            )
+            if diagnostics.approximate:
+                report = self._partition.last_report()
+                lines.append(
+                    f"分治近似：{report.blocks} 个块，其中 {report.blocks_with_resources} 个含宝藏；"
+                    f"局部深度 {self.local_depth()}，局部候选上限 {self.local_candidate_limit()}；"
+                    f"局部候选 {report.local_candidates}，跨块候选 {report.cross_block_candidates}，"
+                    f"合并比较 {report.merged_candidates} 个方案。"
+                )
+            lines.append(
+                f"本轮实际比较 {len(candidates)} 个根候选；"
+                + ("困难模式隐藏候选估值及预计得分。" if hidden else
+                   "U = AI 分数 − 对手分数；" + ("合并使用即时分差。" if diagnostics.approximate else "搜索值用于比较未来分差。"))
+            )
+            for sequence, value, exact in candidates:
+                selected = "【选中】" if sequence == diagnostics.root_move_seq else ""
+                estimate = "" if hidden else (
+                    f"：U = {value:.3f}" if exact else f"：U ≤ {value:.3f}（上界已较差，剪枝排除）"
+                )
+                lines.append(f"候选 {moves(sequence)}{estimate}{selected}")
+            lines.append("选择依据：分差估值最高；同分时依次比较距宝藏距离、有效步数、方向顺序。")
+        lines.append(f"最终动作：{moves(diagnostics.root_move_seq)}。")
+        if not hidden:
+            pos = diagnostics.root_final_pos
+            lines.append(
+                f"预计移动终点：第 {pos.row + 1} 行第 {pos.col + 1} 列；"
+                f"本轮移动预计得分 {diagnostics.root_score_delta:+d}（未含终点对战）。"
+            )
+        lines.append(
+            f"搜索统计：节点 {diagnostics.nodes}，缓存命中 {diagnostics.cache_hits}，"
+            f"未命中 {diagnostics.cache_misses}；算法耗时 {diagnostics.elapsed_ns / 1e6:.3f} ms。"
+        )
+        self._calculation_details = tuple(lines)
+
     def get_diagnostics(self) -> SearchDiagnostics:
         """最近一次决策的诊断；未决策过（构造后直接调用）抛 ``IllegalStateError``。"""
         if self._diagnostics is None:

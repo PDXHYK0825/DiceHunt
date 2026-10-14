@@ -121,10 +121,33 @@ function render(data) {
   if (data.phase === "roll" && !busy) drawDie(null);
   const logs = JSON.stringify(data.logs);
   if (logs !== lastLogs) {
-    lastLogs = logs; $("logs").replaceChildren();
-    for (const line of data.logs) { const p = document.createElement("p"); p.textContent = line; $("logs").append(p); }
+    lastLogs = logs;
+    const container = $("logs");
+    const existing = new Map([...container.children].map(node => [Number(node.dataset.logId), node]));
+    const ids = new Set(data.logs.map(entry => entry.id));
+    for (const node of [...container.children]) if (!ids.has(Number(node.dataset.logId))) node.remove();
+    container.querySelector(".empty-log")?.remove();
+    for (const entry of data.logs) {
+      let node = existing.get(entry.id);
+      if (!node) {
+        node = document.createElement(entry.kind === "ai" ? "details" : "p");
+        node.dataset.logId = entry.id;
+        if (entry.kind === "ai") {
+          node.className = "ai-calculation";
+          const summary = document.createElement("summary");
+          const body = document.createElement("div"); body.className = "calculation-body";
+          node.append(summary, body);
+        }
+        container.append(node);
+      }
+      if (entry.kind === "ai") {
+        const status = {thinking:"计算中…",complete:"已完成",aborted:"已中止",error:"计算失败"}[entry.status];
+        node.querySelector("summary").textContent = `${entry.message} · ${status}`;
+        node.querySelector(".calculation-body").textContent = entry.details.join("\n");
+      } else node.textContent = entry.message;
+    }
     if (!data.logs.length) { const p = document.createElement("p"); p.className = "empty-log"; p.textContent = "每一步探索，都会在这里留下记录。"; $("logs").append(p); }
-    $("logs").scrollTop = $("logs").scrollHeight;
+    if (!container.querySelector("details[open]")) container.scrollTop = container.scrollHeight;
   }
   updateControls(); drawBoard();
   if (!busy && data.frame_id !== lastFrame && data.round) runFrame(data);

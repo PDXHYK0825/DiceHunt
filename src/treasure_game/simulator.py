@@ -457,15 +457,27 @@ class Simulator:
 
         if ai is None:  # pragma: no cover - 由 _resolve_ai 保证
             raise IllegalStateError(f"座位 {seat} 需要机器决策，但 AI 模块不可用")
+        calculation = getattr(self._io, "ai_calculation", None)
+        if callable(calculation):
+            calculation(state_view, None)
         started = time.perf_counter_ns()
         if policy is SeatPolicy.GREEDY:
             raw = ai.get_greedy_move(state, dice_N, seat)  # type: ignore[attr-defined]
         else:  # OPT / OPT_PARTITION 走同一个 OPT 引擎（分治与否由 AiModule 阈值决定）
             raw = ai.get_opt_move(state, dice_N, seat)  # type: ignore[attr-defined]
-        stats["ai_elapsed_ns"] += time.perf_counter_ns() - started
+        elapsed_ns = time.perf_counter_ns() - started
+        stats["ai_elapsed_ns"] += elapsed_ns
         stats["ai_calls"] += 1
         self._collect_diagnostics(ai, stats)
-        return self._normalize_action(raw, source=f"座位 {seat} 的机器决策")
+        action = self._normalize_action(raw, source=f"座位 {seat} 的机器决策")
+        if callable(calculation):
+            getter = getattr(ai, "get_calculation_details", None)
+            details = tuple(getter()) if callable(getter) else (
+                "当前 AI 未提供搜索明细。",
+                "最终动作：" + (" ".join(step.value for step in action) or "end（停留）"),
+            )
+            calculation(state_view, details + (f"本轮决策总耗时：{elapsed_ns / 1e6:.3f} ms。",))
+        return action
 
     def _human_action(
         self, seat: Seat, dice_N: int, view: ViewMap, state_view: PublicStateView

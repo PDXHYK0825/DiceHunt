@@ -55,13 +55,21 @@ class GreedyAI:
     （02 §1 验证点：贪心不看人类座位）。
     """
 
-    __slots__ = ()
+    __slots__ = ("_calculation_details",)
+
+    def __init__(self) -> None:
+        self._calculation_details: list[str] = []
+
+    def calculation_details(self) -> tuple[str, ...]:
+        return tuple(self._calculation_details)
 
     # ------------------------------------------------------------------
     # 目标选择
     # ------------------------------------------------------------------
     @staticmethod
-    def choose_target(true_map: TrueMap, start: Position, dice_N: int) -> Position | None:
+    def choose_target(
+        true_map: TrueMap, start: Position, dice_N: int, *, details: list[str] | None = None
+    ) -> Position | None:
         """按 02 §1 的比率 + tie-break 选出目标宝藏；无可行目标返回 ``None``。
 
         允许 ``start`` 恰好站在宝藏上（距离 0 → 分母按 1 处理）。
@@ -78,6 +86,14 @@ class GreedyAI:
         best_ratio_right = 1  # 比率交叉相乘的右项：best_value * den
         for target in sorted(current_map.remaining_treasures, key=lambda p: (p.row, p.col)):
             distance = distances.get(target)
+            if details is not None:
+                label = f"第 {target.row + 1} 行第 {target.col + 1} 列"
+                value = current_map.treasure_values[target]
+                details.append(
+                    f"宝藏 {label}：{value} 分，不可达，排除。" if distance is None else
+                    f"宝藏 {label}：{value} 分，BFS 距离 {distance}，"
+                    f"性价比 {value}/{max(distance, 1)} = {value / max(distance, 1):.3f}。"
+                )
             if distance is None:  # 不可达资源绝不作为候选
                 continue
             value = current_map.treasure_values[target]
@@ -102,6 +118,11 @@ class GreedyAI:
                 best, best_value, best_distance = target, value, distance
                 best_ratio_left, best_ratio_right = value, denominator
         del best_ratio_left
+        if details is not None:
+            details.append(
+                "没有可达宝藏，本轮停留。" if best is None else
+                f"选定目标：第 {best.row + 1} 行第 {best.col + 1} 列；取最短路径的本轮步数前缀。"
+            )
         return best
 
     # ------------------------------------------------------------------
@@ -119,11 +140,13 @@ class GreedyAI:
         steps = _require_dice(dice_N)
         actor = _require_seat(seat)
         true_map = require_true_map(current_state.true_map)
+        self._calculation_details = []
         if steps == 0 or true_map.is_finished():
+            self._calculation_details.append("没有可用步数或剩余宝藏，本轮停留。")
             return ()
 
         start = current_state.position_of(actor)
-        target = self.choose_target(true_map, start, steps)
+        target = self.choose_target(true_map, start, steps, details=self._calculation_details)
         if target is None:
             return ()
         path = PathModule.bfs_path(true_map, start, target)

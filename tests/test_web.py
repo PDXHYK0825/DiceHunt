@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from treasure_game.gui import GameController
+from treasure_game.ai_module import AiModule
 from treasure_game.models import GameMode
 from treasure_game.web import WebGame, make_server
 
@@ -87,6 +88,64 @@ def test_machine_turns_automatically_roll_once_and_stop_at_timeout(game):
     assert final["result"]["timeout"]
     assert game.controller.last_result.metrics["dice_sequence"] == seen
     assert final["labels"]["A"] == "贪心 AI"
+
+
+def test_ai_calculation_updates_same_log_entry_and_exports(game, tmp_path):
+    started, proceed = threading.Event(), threading.Event()
+
+    class WaitingAI(AiModule):
+        def get_greedy_move(self, state, dice_N, seat):
+            started.set()
+            assert proceed.wait(3)
+            return super().get_greedy_move(state, dice_N, seat)
+
+    game.controller.ai_factory = lambda: WaitingAI(depth=1)
+    path = tmp_path / "calculation-map.txt"
+    path.write_text("4 4\n0 0 0 3\n0 0 0 0\n0 0 0 0\n4 0 0 0\nA 0 0\nB 3 3\n", encoding="utf-8")
+    game.controller.load_txt(path)
+    game.command("/api/start", {"kind": "machine"})
+    state = wait_for(game, "rolling")
+    game.command("/api/ready", {"frame_id": state["frame_id"]})
+    try:
+        assert started.wait(2)
+        thinking = game.snapshot()
+        entry = next(item for item in thinking["logs"] if item["kind"] == "ai")
+        assert thinking["phase"] == "thinking" and entry["status"] == "thinking"
+        assert "第 1 轮 · A（贪心 AI）" in entry["message"]
+        assert f"骰子 N={state['dice']}" in entry["details"][0]
+    finally:
+        proceed.set()
+    next_turn = wait_for(game, "rolling")
+    completed = next(item for item in next_turn["logs"] if item["id"] == entry["id"])
+    assert completed["status"] == "complete" and next_turn["turn"] == "B"
+    assert "BFS 距离" in "\n".join(completed["details"])
+    assert entry["status"] == "thinking"  # 已返回的快照不随后台计算改变。
+    game.command("/api/ready", {"frame_id": next_turn["frame_id"]})
+    final = wait_for(game, "finished")
+    calculations = [item for item in final["logs"] if item["kind"] == "ai"]
+    assert len(calculations) == 2
+    assert "B（OPT 最优 AI）" in calculations[1]["message"]
+    assert "困难模式隐藏" in "\n".join(calculations[1]["details"])
+    assert "AI 计算过程" in game.download(report=True)
+    # 新局清空记录，同时分配新 ID，页面不会继承上一局的展开状态。
+    game.command("/api/start", {"kind": "machine"})
+    restarted = wait_for(game, "rolling")
+    assert restarted["logs"] == []
+
+
+def test_failed_ai_calculation_closes_pending_entry(game):
+    class BrokenAI(IdleAI):
+        def get_greedy_move(self, state, dice_N, seat=None):
+            raise RuntimeError("测试计算失败")
+
+    game.controller.ai_factory = BrokenAI
+    game.command("/api/start", {"kind": "machine"})
+    state = wait_for(game, "rolling")
+    game.command("/api/ready", {"frame_id": state["frame_id"]})
+    final = wait_for(game, "error")
+    assert not final["running"]
+    entry = next(item for item in final["logs"] if item["kind"] == "ai")
+    assert entry["status"] == "error"
 
 
 @pytest.mark.parametrize("phase", ["roll", "rolling", "input"])

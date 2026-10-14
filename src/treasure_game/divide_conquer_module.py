@@ -105,7 +105,7 @@ class DivideConquerModule:
     * ``block_rows`` / ``block_cols``：行/列切成几段（默认 4×4 = 至多 16 块，边缘允许不足）。
     """
 
-    __slots__ = ("partition_threshold", "block_rows", "block_cols", "_last_report")
+    __slots__ = ("partition_threshold", "block_rows", "block_cols", "_last_report", "_candidates")
 
     def __init__(
         self,
@@ -124,6 +124,11 @@ class DivideConquerModule:
         self.block_rows = block_rows
         self.block_cols = block_cols
         self._last_report: PartitionReport | None = None
+        self._candidates: tuple[tuple[tuple[Direction, ...], float, bool], ...] = ()
+
+    def root_candidates(self) -> tuple[tuple[tuple[Direction, ...], float, bool], ...]:
+        """最近一次合并时实际计算的候选与即时分差。"""
+        return self._candidates
 
     # ------------------------------------------------------------------
     # 分块
@@ -286,6 +291,7 @@ class DivideConquerModule:
             return (distance, valid_steps, rank)
 
         chosen = min(tied, key=tie_key)
+        self._candidates = tuple((item[3], item[0], True) for item in scored)
         elapsed_ns = time.perf_counter_ns() - start_ns
         self._last_report = PartitionReport(
             threshold=self.partition_threshold,

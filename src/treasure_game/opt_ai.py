@@ -278,6 +278,7 @@ class _Search:
         "_root_turn_index",
         "_root_depth",
         "root_value",
+        "root_candidates",
         "human_model_id",
     )
 
@@ -305,6 +306,7 @@ class _Search:
         self._root_turn_index = state.turn_index
         self._root_depth = config.depth
         self.root_value = float("-inf")
+        self.root_candidates: list[tuple[tuple[Direction, ...], float, bool]] = []
 
     # ------------------------------------------------------------------
     # 静态查询缓存（BFS/最短路只依赖静态底图，可安全跨节点复用）
@@ -770,9 +772,11 @@ class _Search:
             if not bound.exact:
                 # 界不能直接用于 tie-break：先排除"严格更差"，其余用全窗口重搜求精确值。
                 if bound.hi < best_lower - _TIE_EPS:
+                    self.root_candidates.append((seq, bound.hi, False))
                     continue
                 bound = self.search_chance(child, depth - 1, -_INF, _INF)
             value = bound.lo
+            self.root_candidates.append((seq, value, True))
             if value > best_lower:
                 best_lower = value
             results.append((value, child, result, seq))
@@ -802,7 +806,7 @@ class OptAI:
     ``PathModule.sim_player_multi_step`` 得到，保证"预测 = 重放"。
     """
 
-    __slots__ = ("_config", "_diagnostics", "_root_utility")
+    __slots__ = ("_config", "_diagnostics", "_root_utility", "_root_candidates")
 
     def __init__(self, config: OptConfig | None = None) -> None:
         if config is not None and not isinstance(config, OptConfig):
@@ -810,6 +814,7 @@ class OptAI:
         self._config = config if config is not None else OptConfig()
         self._diagnostics: SearchDiagnostics | None = None
         self._root_utility: float | None = None
+        self._root_candidates: tuple[tuple[tuple[Direction, ...], float, bool], ...] = ()
 
     @property
     def config(self) -> OptConfig:
@@ -846,6 +851,7 @@ class OptAI:
             true_map, current_state.position_of(actor), sequence, steps, actor=actor
         )
         self._root_utility = search.root_value
+        self._root_candidates = tuple(search.root_candidates)
         self._diagnostics = SearchDiagnostics(
             algorithm=SEARCH_ALGORITHM,
             nodes=search.nodes,
@@ -863,6 +869,10 @@ class OptAI:
     # ------------------------------------------------------------------
     # 诊断与根效用（追加 API，不改冻结签名）
     # ------------------------------------------------------------------
+    def root_candidates(self) -> tuple[tuple[tuple[Direction, ...], float, bool], ...]:
+        """本次实际比较的根候选：(动作、搜索值或上界、是否精确)。"""
+        return self._root_candidates
+
     def diagnostics(self) -> SearchDiagnostics:
         """最近一次 ``decide`` 的可观察证据；未决策过则抛 ``IllegalStateError``。"""
         if self._diagnostics is None:

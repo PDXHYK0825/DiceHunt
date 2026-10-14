@@ -36,6 +36,8 @@ class WebGame:
         self.worker = None
         self.labels = dict(SEAT_LABELS_HUMAN_VS_AI[self.controller.mode])
         self.logs = []
+        self.next_log_id = 0
+        self.calculation = None
         self.frame_id = 0
         self.dice_N = None
         self.ready = False
@@ -70,13 +72,26 @@ class WebGame:
                 **self.data,
                 "running": self.running,
                 "labels": {seat.value: label for seat, label in self.labels.items()},
-                "logs": list(self.logs[-200:]),
+                "logs": [dict(entry) for entry in self.logs[-200:]],
                 "report_ready": self.controller.last_result is not None and not self.running,
             }
 
     def append_log(self, message):
         with self.condition:
-            self.logs.append(str(message))
+            entry = {"id": self.next_log_id, "message": str(message), "kind": "text"}
+            self.next_log_id += 1
+            self.logs.append(entry)
+            return entry
+
+    def ai_calculation(self, summary, details, thinking):
+        with self.condition:
+            if self.stopped:
+                return
+            if thinking:
+                self.calculation = self.append_log(summary)
+            self.calculation.update(
+                kind="ai", details=list(details), status="thinking" if thinking else "complete",
+            )
 
     def apply_frame(self, frame):
         with self.condition:
@@ -97,7 +112,7 @@ class WebGame:
                     "position": _position(event.position) if event.position else None,
                     "message": message,
                 })
-                self.logs.append(f"[{event.kind}] {message}")
+                self.append_log(f"[{event.kind}] {message}")
             self.data = {
                 **self._view(frame.view, state.pos_a, state.pos_b),
                 "score_a": state.score_a, "score_b": state.score_b,
@@ -129,6 +144,7 @@ class WebGame:
         self.running = True
         self.stopped = False
         self.logs.clear()
+        self.calculation = None
         self.controller.last_result = None
         self.labels = (
             dict(SEAT_LABELS_HUMAN_VS_AI[self.controller.mode]) if kind == "human"
@@ -163,8 +179,10 @@ class WebGame:
                 if self.stopped:
                     phase, outcome = "aborted", None
                     self.controller.last_result = None
+                if self.calculation and self.calculation["status"] == "thinking":
+                    self.calculation.update(status="aborted" if phase == "aborted" else "error")
                 if error:
-                    self.logs.append(f"对局失败：{error}")
+                    self.append_log(f"对局失败：{error}")
                 self.data.update(phase=phase, result=outcome)
                 self.running = False
                 self.condition.notify_all()
@@ -182,10 +200,11 @@ class WebGame:
                     payload["height"], payload["width"], payload["walls"],
                     payload["treasures"], payload["traps"], seed=payload.get("seed"),
                 )
-                self.logs = ["已生成地图：A 固定左上角，B 固定右下角。"]
+                self.logs.clear()
+                self.append_log("已生成地图：A 固定左上角，B 固定右下角。")
                 self.preview()
             elif route == "/api/map/edit":
-                self.logs.append(self.controller.cycle_cell(payload["row"], payload["col"]))
+                self.append_log(self.controller.cycle_cell(payload["row"], payload["col"]))
                 self.preview()
             elif route == "/api/map/load":
                 with tempfile.TemporaryDirectory(prefix="dicehunt-map-") as directory:
@@ -193,7 +212,8 @@ class WebGame:
                     path.write_text(payload["text"], encoding="utf-8")
                     self.controller.load_txt(path)
                 self.controller.source = "浏览器导入地图"
-                self.logs = ["已读取 txt 地图。"]
+                self.logs.clear()
+                self.append_log("已读取 txt 地图。")
                 self.preview()
             elif route == "/api/mode":
                 self.controller.set_mode(GameMode(payload["mode"]))

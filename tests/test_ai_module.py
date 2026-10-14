@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import random
 import time
 
@@ -138,6 +139,41 @@ def test_diagnostics_before_any_decision_raises() -> None:
         module.get_root_utility()
     with pytest.raises(IllegalStateError):
         module.get_root_eval()
+    with pytest.raises(IllegalStateError):
+        module.get_calculation_details()
+
+
+@pytest.mark.parametrize("algorithm", ["greedy", "opt", "opt+partition"])
+def test_calculation_details_match_current_decision(algorithm: str) -> None:
+    state = _perf_state()
+    module = AiModule(depth=1, candidate_limit=8, partition_threshold=1 if algorithm == "opt+partition" else 144)
+    sequence = (module.get_greedy_move if algorithm == "greedy" else module.get_opt_move)(state, 2, Seat.B)
+    details = "\n".join(module.get_calculation_details())
+    assert f"算法：{algorithm}" in details
+    assert "最终动作：" + (" ".join(step.value for step in sequence) or "end（停留）") in details
+    assert "搜索统计：节点" in details
+    if algorithm == "greedy":
+        assert "BFS 距离" in details and "选定目标" in details
+    else:
+        assert "【选中】" in details and "U =" in details
+    if algorithm == "opt+partition":
+        assert "分治近似" in details and "合并比较" in details
+    # 同一实例下一回合切换算法时不得带入上一轮候选。
+    module.get_greedy_move(state, 0, Seat.A)
+    next_details = "\n".join(module.get_calculation_details())
+    assert "没有可用步数" in next_details and "【选中】" not in next_details
+
+
+@pytest.mark.parametrize("partition", [False, True])
+def test_hard_calculation_details_hide_estimates(partition: bool) -> None:
+    state = _perf_state()
+    state = dataclasses.replace(state, mode=GameMode.HARD)
+    module = AiModule(depth=1, partition_threshold=1 if partition else 144)
+    module.get_opt_move(state, 2, Seat.B)
+    details = "\n".join(module.get_calculation_details())
+    assert "困难模式隐藏" in details and "【选中】" in details
+    assert "U =" not in details and "U ≤" not in details
+    assert "预计移动终点" not in details and "本轮移动预计得分" not in details
 
 
 def test_greedy_diagnostics_and_root_projection() -> None:

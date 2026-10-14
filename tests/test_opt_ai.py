@@ -501,6 +501,22 @@ def test_diagnostics_before_decide_raises() -> None:
         ai.root_eval()
 
 
+def test_recorded_root_candidates_match_actual_depth_one_utilities() -> None:
+    _, state = _spec_case_2()
+    ai = OptAI(OptConfig(depth=1, candidate_limit=8))
+    sequence = ai.decide(state, 1, Seat.B)
+    candidates = ai.root_candidates()
+    assert candidates and any(seq == sequence for seq, _, _ in candidates)
+    for seq, value, exact in candidates:
+        move = _replay(state, Seat.B, 1, seq)
+        battle = BattleModule.trigger_battle(
+            move.true_map, state.pos_a, move.final_pos,
+            state.score_a, state.score_b + move.score_delta,
+        )
+        assert exact and value == battle.score_b - battle.score_a
+    assert max(value for _, value, _ in candidates) == ai.root_utility()
+
+
 def test_dice_zero_returns_empty_with_valid_diagnostics() -> None:
     _, state = _spec_case_2()
     ai = OptAI(OptConfig(depth=2, candidate_limit=8))
