@@ -1598,10 +1598,13 @@ def _build_qt_classes() -> dict[str, type]:
         def _on_trap(self, event: GameEvent) -> None:
             """踩陷阱弹窗；HARD 首次踩中隐藏陷阱走"隐藏陷阱"标题（文案含"陷阱已暴露"）。"""
             hidden = is_hidden_trap(event)
+            text = str(event.message)
+            if event.actor is not None:
+                text = f"触发玩家：{self._seat_name(event.actor)}\n{text}"
             self._show_popup(
                 "TRAP",
                 "踩到隐藏陷阱！" if hidden else "踩到陷阱",
-                str(event.message),
+                text,
                 warning=True,
             )
 

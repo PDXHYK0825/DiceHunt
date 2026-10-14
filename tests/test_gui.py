@@ -700,7 +700,7 @@ def test_hard_board_matches_view_and_hides_traps(make_window, tmp_path: pathlib.
 
 @requires_qt
 def test_hard_trap_reveal_end_to_end(make_window, tmp_path: pathlib.Path) -> None:
-    """A 踩隐藏陷阱 → 弹窗（冻结文案）→ 陷阱暴露（棋盘出现负值）。"""
+    """A 踩隐藏陷阱 → 弹窗说明触发玩家 → 陷阱暴露（棋盘出现负值）。"""
     window = make_window(mode=GameMode.HARD)
     window.on_load(_write_map(tmp_path, TRAP_MAP))
     assert "-2" not in window.board.board_text()
@@ -709,7 +709,8 @@ def test_hard_trap_reveal_end_to_end(make_window, tmp_path: pathlib.Path) -> Non
         GameMode.HARD, io=io, max_turns=3, dice_seed_table=(2, 1)
     )
     assert any(
-        popup.text == "【踩到隐藏陷阱！扣除 2 分，陷阱已暴露】" for popup in window.popups
+        popup.text == "触发玩家：A（人类）\n【踩到隐藏陷阱！扣除 2 分，陷阱已暴露】"
+        for popup in window.popups
     ), "HARD 首次踩中隐藏陷阱必须有弹窗提示"
     assert result.score_a == 0, "-2（陷阱）+2（宝藏）= 0"
     assert "-2" in window.board.board_text(), "暴露后棋盘显示真实负值"
@@ -786,11 +787,13 @@ def test_popup_methods_create_message_box(qapp, make_window) -> None:
 
     window._on_trap(GameEvent.trap(Seat.A, Position(0, 1), -2))
     assert window.popups[-1].kind == "TRAP" and window.popups[-1].title == "踩到陷阱"
-    assert window.popups[-1].text == "踩到陷阱 -2 分"
+    assert window.popups[-1].text == "触发玩家：A（人类）\n踩到陷阱 -2 分"
+    assert window.last_message_box.text() == window.popups[-1].text
 
-    window._on_trap(GameEvent.trap(Seat.A, Position(0, 1), -2, hidden=True))
+    window._on_trap(GameEvent.trap(Seat.B, Position(0, 1), -2, hidden=True))
     assert window.popups[-1].title == "踩到隐藏陷阱！"
-    assert window.popups[-1].text == "【踩到隐藏陷阱！扣除 2 分，陷阱已暴露】"
+    assert window.popups[-1].text == "触发玩家：B（OPT 最优 AI）\n【踩到隐藏陷阱！扣除 2 分，陷阱已暴露】"
+    assert window.last_message_box.text() == window.popups[-1].text
 
     window._on_battle(GameEvent.battle(Seat.A, Seat.B))
     assert window.popups[-1].kind == "BATTLE"
