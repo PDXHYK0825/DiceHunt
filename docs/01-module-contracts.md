@@ -33,7 +33,7 @@ def MapModule.save_txt(path: Path, true_map: TrueMap, pos_a: Position, pos_b: Po
 def MapModule.generate(height: int, width: int, walls: int, treasures: int, traps: int, rng: random.Random) -> tuple[TrueMap, Position, Position]  # 静态方法
 ```
 
-`get_view_map` 的 EASY/NORMAL 暴露全部当前资源与陷阱，HARD 对 `active_traps` 中尚未 `revealed_traps` 的格显示 0；`revealed_traps` 始终显示其原始负值，但 `spent_traps` 标注无剩余伤害。对外不得返回底图/陷阱原值的引用。`load_txt` 只接受 D3 首行维度、整数矩阵与两行坐标，语法/连通错误抛 `MapFormatError`，找不到/无法写文件透传 `OSError`；`save_txt` 对已游玩地图抛 `IllegalStateError`，确保不把动态视图误作原图。`generate` 先验证 `height*width >= 2+walls+treasures+traps`、宝藏分值/陷阱扣分默认固定为 `+2/-2`、数量非负、连通且出生点空而异；1000 次无成功抛 `MapGenerationError`，参数错误抛 `ValueError`。狭小/不连通 txt 一律拒绝，不能让胜负条件陷入不可达。
+`get_view_map` 的 EASY/NORMAL 暴露全部当前资源与陷阱，HARD 对 `active_traps` 中尚未 `revealed_traps` 的格显示 0；`revealed_traps` 始终显示其原始负值，但 `spent_traps` 标注无剩余伤害。对外不得返回底图/陷阱原值的引用。`load_txt` 接受 D3 首行维度、整数矩阵与两行坐标（`+1` 表示 1 分宝藏，`1` 表示墙），语法/连通错误抛 `MapFormatError`，找不到/无法写文件透传 `OSError`；`save_txt` 对已游玩地图抛 `IllegalStateError`，确保不把动态视图误作原图。`generate` 先验证 `height*width >= 2+walls+treasures+traps`、宝藏默认独立抽取（1–10 分各 9.9%，15/20 分各 0.5%）、陷阱默认 `-2`、数量非负、连通且出生点空而异；1000 次无成功抛 `MapGenerationError`，参数错误抛 `ValueError`。狭小/不连通 txt 一律拒绝，不能让胜负条件陷入不可达。
 
 ## 2. PathModule｜`src/treasure_game/path_module.py`
 

@@ -1138,7 +1138,7 @@ def test_real_human_policy_works_behind_view_heuristic_io() -> None:
     case = rb.build_case_matrix(config)[0].cases[0]
     true_map, pos_a, pos_b = _RealMapModule.generate(  # type: ignore[union-attr]
         case.height, case.width, case.walls, case.treasures, case.traps,
-        random.Random(case.map_seed), treasure_value=2, trap_value=-2,
+        random.Random(case.map_seed), trap_value=-2,
     )
     view = _RealMapModule(true_map).get_view_map(GameMode(case.mode))  # type: ignore[operator]
     public = PublicStateView(
@@ -1194,7 +1194,6 @@ def test_real_map_generation_shares_layout_per_map_seed() -> None:
         true_map, pos_a, pos_b = _RealMapModule.generate(  # type: ignore[union-attr]
             *params,
             random.Random(case.map_seed),
-            treasure_value=2,
             trap_value=-2,
         )
         assert pos_a != pos_b, "出生点必须不同"
@@ -1209,7 +1208,7 @@ def test_real_map_generation_shares_layout_per_map_seed() -> None:
     # 重新生成（模拟不同骰序单元/不同模式各自的构造路径）必须逐字一致
     for map_seed, (params, map_id, pos_a, pos_b) in layout.items():
         again = _RealMapModule.generate(  # type: ignore[union-attr]
-            *params, random.Random(map_seed), treasure_value=2, trap_value=-2
+            *params, random.Random(map_seed), trap_value=-2
         )
         assert (again[0].map_id, again[1], again[2]) == (map_id, pos_a, pos_b)
 
@@ -1230,7 +1229,6 @@ def test_both_map_arms_generate_on_real_generator() -> None:
             config.treasures,
             config.traps,
             random.Random(43),
-            treasure_value=2,
             trap_value=-2,
         )
         assert (true_map.height, true_map.width) == (height, width)
@@ -1307,3 +1305,11 @@ def test_real_simulator_three_row_smoke(tmp_path: pathlib.Path) -> None:
     assert payload["checks"]["dice_sequence_matches_table"]["failed"] == 0
     assert payload["checks"]["timed_out_consistent"]["failed"] == 0
     assert payload["aggregate"]["per_mode"]["EASY"]["games"] == 1
+    assert payload["config"]["treasure_distribution"] == {
+        **{str(value): 0.099 for value in range(1, 11)}, "15": 0.005, "20": 0.005
+    }
+    case = rb.build_case_matrix(rb.BatchConfig(seed=42, maps=1, dice_seeds=1))[0].cases[0]
+    generated, _, _ = _RealMapModule.generate(
+        case.height, case.width, case.walls, case.treasures, case.traps, random.Random(case.map_seed)
+    )
+    assert {row["map_id"] for row in rows} == {generated.map_id}

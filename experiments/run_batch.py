@@ -113,7 +113,7 @@ for _p in (str(SRC_DIR), str(PROJECT_ROOT)):
 # --------------------------------------------------------------------------------------
 RUN_BATCH_VERSION = "w4-01/1.0"
 DICE_TABLE_VERSION = "dice-table/v1 (randint(1,6), index=turn_index*2+A?0:1)"
-MAP_GEN_VERSION = "map-module.generate/v1 (treasure_value=2, trap_value=-2)"
+MAP_GEN_VERSION = "map-module.generate/v2 (treasure=1-10:9.9% each,15/20:0.5% each; trap_value=-2)"
 STATS_VERSION = "stats/v1 (mean | sample-std n-1 | linear percentile | cluster bootstrap by map_seed)"
 
 #: 严格等于 04-test-plan「记录 schema」的 20 列，顺序不可变。
@@ -341,7 +341,9 @@ class BatchConfig:
             "walls": self.walls,
             "treasures": self.treasures,
             "traps": self.traps,
-            "treasure_value": 2,
+            "treasure_distribution": {
+                **{str(value): 0.099 for value in range(1, 11)}, "15": 0.005, "20": 0.005
+            },
             "trap_value": -2,
             "depth": self.depth,
             "K": self.candidate_limit,
@@ -1249,7 +1251,6 @@ class SimulatorCaseRunner:
             case.treasures,
             case.traps,
             rng,
-            treasure_value=2,
             trap_value=-2,
         )
         self.map_gen_ns_total += time.perf_counter_ns() - map_started

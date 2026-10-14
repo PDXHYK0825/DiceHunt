@@ -6,6 +6,9 @@
 平局或全图没有可用空白格时位置不变。地图宝藏被拾取完即终局。
 支持三种模式、三种对局形态，并附带批量随机地图仿真与算法对比。
 
+随机生成或手动添加宝藏时，每枚宝藏独立抽取分值：**1–10 分各 9.9%，15 分和 20 分各 0.5%**。
+分值生成后固定并显示在地图上，拾取时按该分值加分；保存/读取地图不会重新抽取，同 seed 可复现。
+
 | 模式 | 机器 AI | 陷阱可见性（人工视角） |
 | --- | --- | --- |
 | 简单 EASY | 贪心 AI（BFS 性价比选宝，无博弈推演） | 完全可见 |
@@ -115,7 +118,7 @@ python -m treasure_game.gui                    REM 选做 PyQt6，需自行安�
 ```
 5 5                 <- 首行：height width（空格分隔）
 0 0 0 0 0           <- 之后 height 行，每行 width 个整数
-0 1 0 0 0           <- 0 空地 / 1 障碍物 / >=2 宝藏分值 / <=-1 陷阱扣分
+0 1 +1 0 0          <- 0 空地 / 1 障碍物 / +1 为1分宝藏 / >=2 宝藏分值 / <=-1 陷阱扣分
 0 0 0 -2 0
 0 0 0 0 2
 0 0 0 0 0
@@ -125,7 +128,7 @@ B 4 4               <- 座位 B 出生点
 
 规则与校验：
 
-* `1` 唯一表示墙（墙优先），宝藏分值从 `2` 起，陷阱为负值；
+* `1` 表示墙，`+1` 表示 1 分宝藏，`2` 及以上表示对应分值的宝藏，陷阱为负值；旧地图仍可读取；
 * 两个出生点必须落在空地且互不相同；**所有非墙格必须与 A 连通**（因此 B 与全部宝藏可达）；
 * 语法/结构非法抛 `MapFormatError`（`ValueError` 子类），文件不存在等 IO 问题透传 `OSError`；
 * 加载后地图拆成"静态底图 + 资源原值 + 动态剩余/已揭示集合"两层；
@@ -178,7 +181,8 @@ from treasure_game.path_module import PathModule
 
 * `TrueMap.create(height, width, terrain, treasures, traps, *, remaining_treasures=None,
   active_traps=None, revealed_traps=None, map_id="")` —— 初始局面构造；省略 `map_id` 时自动算静态指纹。
-* `TrueMap.from_grid(grid)` —— 从 txt 同构整数矩阵构造（0/1/≥2/≤-1），非矩形抛 `MapFormatError`。
+* `TrueMap.from_grid(grid)` —— 从整数矩阵构造（0/1/≥2/≤-1），非矩形抛 `MapFormatError`；
+  1 分宝藏用 `TrueMap.create(..., treasures={pos: 1})` 构造，txt 中使用 `+1`。
 * `TrueMap` 约定：`terrain` 为 `tuple[tuple[int, ...], ...]`；`treasure_values`/`trap_values` 为
   `MappingProxyType`，键是 `Position`；三个集合为 `frozenset`；全部字段冻结不可变。
   构造期做廉价校验（形状、边界、分值符号、两层不重叠、剩余/激活集合为子集）。

@@ -230,7 +230,7 @@ class ConsoleIO:
                     cells.append("B")
                 else:
                     value = view.cell_value(row, col)
-                    cells.append("#" if value == 1 else ("." if value == 0 else str(value)))
+                    cells.append("#" if view.is_wall(row, col) else ("." if value == 0 else str(value)))
             lines.append(f"{row:>3}  " + "".join(f"{cell:>3}" for cell in cells))
         for line in lines:
             self.write(line)

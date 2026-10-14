@@ -229,8 +229,8 @@ def _normalize_value_layer(
             raise ValueError(f"{name} 坐标 {key} 越界（地图 {height}x{width}）")
         if type(value) is not int:
             raise ValueError(f"{name} 分值必须是 int，收到 {type(value).__name__}")
-        if is_treasure and value < 2:
-            raise ValueError(f"{name} 分值必须 >= 2（1 保留给墙），收到 {value}")
+        if is_treasure and value < 1:
+            raise ValueError(f"{name} 分值必须 >= 1，收到 {value}")
         if not is_treasure and value > -1:
             raise ValueError(f"{name} 分值必须 <= -1，收到 {value}")
         items[key] = value
@@ -391,9 +391,9 @@ class TrueMap:
 
     @classmethod
     def from_grid(cls, grid: typing.Iterable[typing.Iterable[int]], *, map_id: str = "") -> "TrueMap":
-        """从 txt 同构的整数矩阵构造：``0`` 空地 / ``1`` 墙 / ``>=2`` 宝藏 / ``<=-1`` 陷阱。
+        """从整数矩阵构造：``0`` 空地 / ``1`` 墙 / ``>=2`` 宝藏 / ``<=-1`` 陷阱。
 
-        与 D1 决策一致：``1`` 唯一表示墙，宝藏分值从 ``2`` 起。矩阵非矩形或含非整数时抛
+        整数 ``1`` 表示墙；1 分宝藏请用 ``create(..., treasures={pos: 1})``。矩阵非矩形或含非整数时抛
         :class:`MapFormatError`（``ValueError`` 子类）。
         """
         rows: list[tuple[int, ...]] = []
@@ -515,6 +515,7 @@ class ViewMap:
     cells: tuple[tuple[int, ...], ...]
     spent_traps: frozenset[Position]
     mode: GameMode
+    treasure_cells: frozenset[Position] = frozenset()  # 可见宝藏坐标，区分 1 分宝藏与墙
 
     def __post_init__(self) -> None:
         if type(self.height) is not int or type(self.width) is not int:
@@ -531,6 +532,13 @@ class ViewMap:
             )
         object.__setattr__(self, "cells", cells)
         object.__setattr__(self, "spent_traps", frozenset(self.spent_traps))
+        object.__setattr__(self, "treasure_cells", frozenset(self.treasure_cells))
+
+    def is_wall(self, row: int, col: int) -> bool:
+        return self.cell_value(row, col) == 1 and Position(row, col) not in self.treasure_cells
+
+    def is_treasure(self, row: int, col: int) -> bool:
+        return self.cell_value(row, col) >= 2 or Position(row, col) in self.treasure_cells
 
     def in_bounds(self, row: int, col: int) -> bool:
         """给定行列是否在视图范围内。"""

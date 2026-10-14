@@ -196,7 +196,7 @@ def _bfs_flat(
             if next_row < 0 or next_row >= height or next_col < 0 or next_col >= width:
                 continue
             cell = cells[next_row][next_col]
-            if cell == 1:  # 墙
+            if view.is_wall(next_row, next_col):
                 continue
             if avoid_negative and cell < 0:  # 看得见的陷阱格：绕开
                 continue
@@ -231,7 +231,7 @@ def _bfs_distances_flat(
             if next_row < 0 or next_row >= height or next_col < 0 or next_col >= width:
                 continue
             cell = cells[next_row][next_col]
-            if cell == 1:  # 墙
+            if view.is_wall(next_row, next_col):
                 continue
             if avoid_negative and cell < 0:
                 continue
@@ -270,13 +270,13 @@ def _prefix_flat(
 
 
 def _treasure_indices(view: ViewMap) -> list[int]:
-    """视图上可见宝藏格（``>= 2``）的扁平下标，按行优先（= ``(row, col)`` 字典序）。"""
+    """视图上可见宝藏格的扁平下标（含 1 分宝藏），按行优先（= ``(row, col)`` 字典序）。"""
     width = view.width
     found: list[int] = []
     for row_index, row in enumerate(view.cells):
         base = row_index * width
         for col_index, value in enumerate(row):
-            if value >= 2:
+            if value >= 2 or Position(row_index, col_index) in view.treasure_cells:
                 found.append(base + col_index)
     return found
 
@@ -313,14 +313,14 @@ def _view_path_stats(
         if next_row < 0 or next_row >= height or next_col < 0 or next_col >= width:
             continue
         value = cells[next_row][next_col]
-        if value == 1:  # 墙
+        if view.is_wall(next_row, next_col):
             continue
         index = next_row * width + next_col
         valid_steps += 1
         if value < 0:
             trap_steps += 1
             trap_loss += -value
-        elif value >= 2:
+        elif view.is_treasure(next_row, next_col):
             gain += value
     return trap_steps, trap_loss, gain, index, valid_steps
 

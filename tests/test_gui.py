@@ -386,6 +386,39 @@ def test_report_requires_a_finished_game() -> None:
         controller.export_report()
 
 
+def test_editing_preserves_one_point_treasure_and_cycles_rare_values(tmp_path, monkeypatch) -> None:
+    controller = gui.GameController()
+    controller.load_txt(_write_map(tmp_path, "2 4\n0 +1 0 0\n0 0 0 0\nA 0 0\nB 1 3\n"))
+    controller.set_cell(1, 1, 1)
+    assert controller.true_map.treasure_values == {Position(0, 1): 1}
+    assert controller.true_map.terrain[0][1] == 0
+    assert controller.true_map.terrain[1][1] == 1
+
+    values = iter((1, 15, 20))
+    monkeypatch.setattr(gui.MapModule, "draw_treasure_value", lambda rng: next(values))
+    for value in (1, 15, 20):
+        controller.set_cell(0, 2, 1)
+        assert f"+{value}" in controller.cycle_cell(0, 2)
+        assert controller.true_map.treasure_values[Position(0, 2)] == value
+        controller.cycle_cell(0, 2)
+        assert Position(0, 2) not in controller.true_map.treasure_values
+        assert controller.true_map.trap_values[Position(0, 2)] == -2
+
+
+@requires_qt
+def test_board_distinguishes_one_point_treasure_from_wall(make_window, tmp_path) -> None:
+    window = make_window(mode=GameMode.NORMAL)
+    window.on_load(_write_map(tmp_path, "2 4\n0 +1 1 15\n0 20 0 0\nA 0 0\nB 1 3\n"))
+    assert window.board.cell_text(0, 1) == "+1"
+    assert window.board.cell_text(0, 2) == "#"
+    assert window.board.cell_text(0, 3) == "+15"
+    assert window.board.cell_text(1, 1) == "+20"
+    assert window.board.item(0, 1).background() != window.board.item(0, 2).background()
+    window.board.set_tokens(Position(0, 1), Position(1, 3))
+    window.board.set_tokens(Position(0, 0), Position(1, 3))
+    assert window.board.cell_text(0, 1) == "+1"
+
+
 # --------------------------------------------------------------------------------------
 # 3. 主窗口可构造（offscreen）
 # --------------------------------------------------------------------------------------
@@ -435,7 +468,10 @@ def test_generate_from_form_matches_params(make_window) -> None:
     grid = window.controller.grid
     assert len(grid) == 5 and all(len(row) == 6 for row in grid), "格数必须与表单参数一致"
     flat = [value for row in grid for value in row]
-    assert flat.count(1) == 5 and flat.count(2) == 2 and flat.count(-2) == 1
+    true_map = window.controller.true_map
+    assert sum(row.count(1) for row in true_map.terrain) == 5
+    assert len(true_map.treasure_values) == 2 and flat.count(-2) == 1
+    assert set(true_map.treasure_values.values()) <= {*range(1, 11), 15, 20}
     # 棋盘控件尺寸与地图一致（5 行 × 6 列）
     assert (window.board.rowCount(), window.board.columnCount()) == (5, 6)
     assert window.controller.pos_a != window.controller.pos_b, "两出生点不得重合"
@@ -463,7 +499,9 @@ def test_cell_edit_cycles_and_birth_point_wall_rejected(make_window, tmp_path: p
     window._on_cell_clicked(1, 1)
     assert window.controller.grid[1][1] == 1 and window.board.cell_text(1, 1) == "#"
     window._on_cell_clicked(1, 1)
-    assert window.controller.grid[1][1] == 2 and window.board.cell_text(1, 1) == "+2"
+    value = window.controller.true_map.treasure_values[Position(1, 1)]
+    assert value in {*range(1, 11), 15, 20}
+    assert window.controller.grid[1][1] == value and window.board.cell_text(1, 1) == f"+{value}"
     window._on_cell_clicked(1, 1)
     assert window.controller.grid[1][1] == -2 and window.board.cell_text(1, 1) == "-2"
     window._on_cell_clicked(1, 1)

@@ -104,7 +104,7 @@ def test_public_api_matches_frozen_contract():
         "trap_value",
         "max_attempts",
     ]
-    assert signature.parameters["treasure_value"].default == 2
+    assert signature.parameters["treasure_value"].default is None
     assert signature.parameters["trap_value"].default == -2
     assert signature.parameters["max_attempts"].default == 1000
     assert list(inspect.signature(MapModule.load_txt).parameters) == ["path"]
@@ -124,7 +124,7 @@ def test_generate_counts_birthpoints_and_connectivity():
     assert len(true_map.treasure_values) == 5
     assert len(true_map.trap_values) == 4
     # 默认分值 +2 / -2（D10）
-    assert set(true_map.treasure_values.values()) == {2}
+    assert set(true_map.treasure_values.values()) <= {*range(1, 11), 15, 20}
     assert set(true_map.trap_values.values()) == {-2}
     # 初始动态层：全部宝藏剩余、全部陷阱未触发、无已暴露陷阱
     assert true_map.remaining_treasures == frozenset(true_map.treasure_values)
@@ -164,7 +164,7 @@ def test_generate_uses_only_injected_rng(monkeypatch):
     def boom(*args, **kwargs):  # pragma: no cover - 触发即失败
         raise AssertionError("MapModule.generate 使用了全局 random")
 
-    for name in ("shuffle", "randint", "choice", "randrange", "sample", "random"):
+    for name in ("shuffle", "randint", "choice", "choices", "randrange", "sample", "random"):
         monkeypatch.setattr(random, name, boom)
 
     true_map, pos_a, pos_b = MapModule.generate(4, 4, walls=3, treasures=2, traps=2, rng=random.Random(7))
@@ -172,15 +172,76 @@ def test_generate_uses_only_injected_rng(monkeypatch):
     assert pos_a != pos_b
 
 
-def test_generate_supports_custom_values():
+@pytest.mark.parametrize("value", [1, 7])
+def test_generate_supports_custom_values(value):
     true_map, _, _ = MapModule.generate(
-        4, 5, walls=2, treasures=3, traps=2, rng=random.Random(9), treasure_value=7, trap_value=-9
+        4, 5, walls=2, treasures=3, traps=2, rng=random.Random(9), treasure_value=value, trap_value=-9
     )
-    assert set(true_map.treasure_values.values()) == {7}
+    assert set(true_map.treasure_values.values()) == {value}
     assert set(true_map.trap_values.values()) == {-9}
     view = MapModule(true_map).get_view_map(GameMode.NORMAL)
-    assert 7 in {value for row in view.cells for value in row}
+    for pos in true_map.remaining_treasures:
+        assert view.is_treasure(pos.row, pos.col) and view.cell_value(pos.row, pos.col) == value
     assert -9 in {value for row in view.cells for value in row}
+
+
+def test_treasure_draw_has_exact_probability_weights():
+    """遍历 1000 个等概率区间：普通宝藏各占 99，高级宝藏各占 5。"""
+    from collections import Counter
+
+    rng = random.Random(0)
+    counts = Counter()
+    for ticket in range(1000):
+        rng.random = lambda ticket=ticket: (ticket + 0.5) / 1000
+        counts[MapModule.draw_treasure_value(rng)] += 1
+    assert counts == {**{value: 99 for value in range(1, 11)}, 15: 5, 20: 5}
+
+
+def test_generated_treasures_are_drawn_individually(monkeypatch):
+    values = iter((1, 10, 15, 20))
+    rng = random.Random(42)
+
+    def draw(injected_rng):
+        assert injected_rng is rng
+        return next(values)
+
+    monkeypatch.setattr(MapModule, "draw_treasure_value", draw)
+    true_map, _, _ = MapModule.generate(2, 3, 0, 4, 0, rng)
+    assert list(true_map.treasure_values.values()) == [1, 10, 15, 20]
+
+
+@pytest.mark.parametrize("mode", list(GameMode))
+def test_one_point_treasure_is_walkable_and_collected_once(mode):
+    pos = Position(0, 1)
+    true_map = _true_map(((0, 0, 1), (0, 0, 0)), ((0, 1, 1),))
+    view = MapModule(true_map).get_view_map(mode)
+    assert view.cell_value(0, 1) == 1
+    assert view.is_treasure(0, 1) and not view.is_wall(0, 1)
+    assert view.is_wall(0, 2) and not view.is_treasure(0, 2)
+
+    from treasure_game.models import Direction
+
+    result = PathModule.sim_player_multi_step(
+        true_map, Position(0, 0), (Direction.RIGHT, Direction.LEFT, Direction.RIGHT), 3
+    )
+    assert result.final_pos == pos and result.valid_steps == 3
+    assert result.score_delta == 1
+    assert [event.score_delta for event in result.events if event.kind == "TREASURE"] == [1]
+    after = MapModule(result.true_map).get_view_map(mode)
+    assert after.cell_value(0, 1) == 0 and not after.is_treasure(0, 1)
+
+
+def test_txt_round_trip_preserves_one_point_and_rare_treasures(tmp_path):
+    true_map = _true_map(
+        ((0, 0, 1, 0), (0, 0, 0, 0)), ((0, 1, 1), (0, 3, 15), (1, 2, 20))
+    )
+    path = tmp_path / "rare_treasures.txt"
+    MapModule.save_txt(path, true_map, Position(0, 0), Position(1, 3))
+    assert path.read_text(encoding="utf-8").splitlines()[1] == "0 +1 1 15"
+    loaded, _, _ = MapModule.load_txt(path)
+    assert loaded.map_id == true_map.map_id
+    assert loaded.terrain == true_map.terrain
+    assert loaded.treasure_values == true_map.treasure_values
 
 
 def test_generate_exact_fit_one_by_two():
@@ -218,8 +279,7 @@ def test_generate_rejects_invalid_parameters(kwargs, reason):
 @pytest.mark.parametrize(
     "overrides, reason",
     [
-        (dict(treasure_value=1), "宝藏分值 1 已被墙占用（D1）"),
-        (dict(treasure_value=0), "宝藏分值必须 >= 2"),
+        (dict(treasure_value=0), "宝藏分值必须 >= 1"),
         (dict(trap_value=0), "陷阱扣分必须 <= -1"),
         (dict(trap_value=1), "陷阱扣分不能为正"),
         (dict(max_attempts=0), "max_attempts 必须为正"),

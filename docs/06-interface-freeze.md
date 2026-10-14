@@ -66,7 +66,7 @@ class TrueMap:
     height: int
     width: int
     terrain: tuple[tuple[int, ...], ...]            # 0 空地 / 1 墙，只读矩形
-    treasure_values: collections.abc.Mapping[Position, int]   # 静态原始布局，值 >= 2
+    treasure_values: collections.abc.Mapping[Position, int]   # 静态原始布局，值 >= 1
     trap_values: collections.abc.Mapping[Position, int]       # 静态原始布局，值 <= -1
     remaining_treasures: frozenset[Position]
     active_traps: frozenset[Position]               # 尚未触发的陷阱
@@ -86,7 +86,10 @@ class ViewMap:
     cells: tuple[tuple[int, ...], ...]              # 0/1/正宝藏/负陷阱（按模式脱敏）
     spent_traps: frozenset[Position]
     mode: GameMode
+    treasure_cells: frozenset[Position] = frozenset()  # 可见宝藏坐标，区分 1 分宝藏与墙
     def cell_value(self, row: int, col: int) -> int
+    def is_wall(self, row: int, col: int) -> bool
+    def is_treasure(self, row: int, col: int) -> bool
 
 class Seat(enum.Enum):
     A = "A"; B = "B"
@@ -214,8 +217,10 @@ class MapModule:
     def save_txt(path: pathlib.Path, true_map: TrueMap, pos_a: Position, pos_b: Position) -> None
     @staticmethod
     def generate(height: int, width: int, walls: int, treasures: int, traps: int,
-                 rng: random.Random, treasure_value: int = 2, trap_value: int = -2,
+                 rng: random.Random, treasure_value: int | None = None, trap_value: int = -2,
                  max_attempts: int = 1000) -> tuple[TrueMap, Position, Position]
+    @staticmethod
+    def draw_treasure_value(rng: random.Random) -> int  # 1–10 分各 9.9%，15/20 分各 0.5%
 
 # battle_module.py
 class BattleModule:

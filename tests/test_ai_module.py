@@ -214,6 +214,30 @@ def test_hard_hidden_traps_do_not_change_human_candidates() -> None:
     assert len(candidates_first) >= 2
 
 
+@pytest.mark.parametrize("mode", list(GameMode))
+@pytest.mark.parametrize("value", [1, 15, 20])
+def test_ai_and_view_policies_collect_one_point_and_rare_treasures(mode, value) -> None:
+    true_map = _empty_map(
+        2, 4, walls=frozenset({Position(0, 2)}), treasures={Position(0, 1): value}
+    )
+    state = _state(true_map, Position(1, 3), Position(0, 0), mode=mode)
+    module = AiModule(depth=1)
+    for sequence in (
+        module.get_greedy_move(state, 1, Seat.B), module.get_opt_move(state, 1, Seat.B)
+    ):
+        assert sequence == (RIGHT,)
+        replay = PathModule.sim_player_multi_step(true_map, state.pos_b, sequence, 1, Seat.B)
+        assert replay.score_delta == value and replay.true_map.is_finished()
+
+    view = MapModule(true_map).get_view_map(mode)
+    public = PublicStateView(
+        mode=mode, pos_a=state.pos_a, pos_b=state.pos_b, score_a=0, score_b=0,
+        turn=Seat.B, turn_index=0, dice_N=1, remaining_treasure_count=1,
+    )
+    for strategy in ("GATHER", "RATIO", "CAUTIOUS"):
+        assert HumanPolicy(strategy).choose(view, Seat.B, 1, public) == (RIGHT,)
+
+
 def test_normal_versus_hard_view_only_differs_in_trap_display() -> None:
     """NORMAL 暴露陷阱 / HARD 伪装空地；陷阱**不阻挡通行**，故确定性候选集完全一致。
 

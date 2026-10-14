@@ -124,7 +124,7 @@ DEFAULT_MAP_PARAMS: tuple[int, int, int, int, int] = (8, 8, 8, 3, 2)
 #: 冒烟模式使用的小地图（1 枚宝藏 → 机器捡完即终局，几秒内可完成）。
 SMOKE_MAP_PARAMS: tuple[int, int, int, int, int] = (4, 4, 3, 1, 1)
 
-#: 地图编辑面板的单击循环：空地 → 墙 → 宝藏 → 陷阱 → 空地。
+#: 地图编辑面板的类型循环：空地 → 墙 → 宝藏（2 为类型标记，分值随机）→ 陷阱 → 空地。
 EDIT_CYCLE: tuple[int, ...] = (0, 1, 2, -2)
 
 #: 交付目录：报告默认落点 ``Project/reports/``。
@@ -209,9 +209,9 @@ def is_hidden_trap(event: object) -> bool:
     )
 
 
-def cell_text(value: int) -> str:
+def cell_text(value: int, *, treasure: bool = False) -> str:
     """格值 → 单元格文本：``#`` 墙 / ``+v`` 宝藏 / ``-v`` 陷阱 / ``·`` 空地。"""
-    if value == 1:
+    if value == 1 and not treasure:
         return CELL_WALL
     if value == 0:
         return CELL_EMPTY
@@ -507,7 +507,7 @@ class GameController:
         traps: int,
         *,
         seed: int | None = None,
-        treasure_value: int = 2,
+        treasure_value: int | None = None,
         trap_value: int = -2,
     ) -> str:
         """一键随机生成地图（复用 ``MapModule.generate``：参数校验 + BFS 连通校验）。"""
@@ -542,30 +542,48 @@ class GameController:
         MapModule.save_txt(target, true_map, pos_a, pos_b)
         return target
 
-    def set_cell(self, row: int, col: int, value: int) -> str:
-        """编辑一个格子（地图编辑面板）。出生点不允许改成墙；非法值抛 ``ValueError``。"""
+    def set_cell(self, row: int, col: int, value: int, *, treasure: bool = False) -> str:
+        """编辑格子；``treasure=True`` 可设置 1 分宝藏。出生点不允许改成墙。"""
         if self._grid is None:
             raise IllegalStateError("尚未加载地图：请先生成或读取地图再编辑")
         if not (0 <= row < len(self._grid) and 0 <= col < len(self._grid[0])):
             raise ValueError(f"格子越界：({row}, {col})（地图 {len(self._grid)}×{len(self._grid[0])}）")
         if type(value) is not int:
             raise ValueError(f"格值必须是 int，收到 {type(value).__name__}")
-        if value == 1 and Position(row, col) in (self.pos_a, self.pos_b):
+        pos = Position(row, col)
+        if value == 1 and not treasure and pos in (self.pos_a, self.pos_b):
             raise ValueError(f"出生点 ({row}, {col}) 不能改成障碍物")
         grid = self.grid
         grid[row][col] = value
-        true_map = TrueMap.from_grid(grid)  # 形状/符号校验（非 1 的 0/正/负语义）
+        current_map, _, _ = self.require_map()
+        terrain = [list(line) for line in current_map.terrain]
+        treasures = dict(current_map.treasure_values)
+        traps = dict(current_map.trap_values)
+        treasures.pop(pos, None)
+        traps.pop(pos, None)
+        terrain[row][col] = 1 if value == 1 and not treasure else 0
+        if treasure or value >= 2:
+            treasures[pos] = value
+        elif value < 0:
+            traps[pos] = value
+        true_map = TrueMap.create(
+            current_map.height, current_map.width, terrain, treasures, traps
+        )
         self._adopt(true_map, self.pos_a, self.pos_b, source=f"{self.source}（已编辑）", grid=grid)
-        return f"已编辑 ({row}, {col}) → {cell_text(value)}"
+        return f"已编辑 ({row}, {col}) → {cell_text(value, treasure=treasure)}"
 
     def cycle_cell(self, row: int, col: int) -> str:
         """单击循环：空地 → 墙 → 宝藏 → 陷阱 → 空地。"""
         if self._grid is None:
             raise IllegalStateError("尚未加载地图：请先生成或读取地图再编辑")
         current = self._grid[row][col]
+        if Position(row, col) in self.true_map.treasure_values:
+            return self.set_cell(row, col, -2)
+        if current == 1:
+            return self.set_cell(row, col, MapModule.draw_treasure_value(self.rng), treasure=True)
         if current in EDIT_CYCLE:
             nxt = EDIT_CYCLE[(EDIT_CYCLE.index(current) + 1) % len(EDIT_CYCLE)]
-        else:  # 非标准分值（例如 +3/-5）→ 回到空地
+        else:  # 非标准陷阱分值（例如 -5）→ 回到空地
             nxt = 0
         return self.set_cell(row, col, nxt)
 
@@ -904,12 +922,12 @@ def _build_qt_classes() -> dict[str, type]:
                     if item is None:  # pragma: no cover - _ensure_shape 保证存在
                         item = QTableWidgetItem("")
                         self.setItem(row, col, item)
-                    text = cell_text(value)
+                    text = cell_text(value, treasure=view.is_treasure(row, col))
                     item.setText(text)
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     item.setBackground(
                         _COLOR_WALL
-                        if value == 1
+                        if view.is_wall(row, col)
                         else _COLOR_TREASURE
                         if value > 0
                         else _COLOR_TRAP
@@ -1007,7 +1025,10 @@ def _build_qt_classes() -> dict[str, type]:
                     if item is None:  # pragma: no cover
                         continue
                     pos = Position(row, col)
-                    text = self._texts.get((row, col), cell_text(view.cell_value(row, col)))
+                    text = self._texts.get(
+                        (row, col),
+                        cell_text(view.cell_value(row, col), treasure=view.is_treasure(row, col)),
+                    )
                     here_a = pos == pos_a
                     here_b = pos == pos_b
                     if here_a and here_b:

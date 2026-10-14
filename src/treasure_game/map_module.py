@@ -33,6 +33,10 @@ __all__ = ["MapModule"]
 WALL: int = 1
 EMPTY: int = 0
 
+# 总权重 1000：1–10 分各 9.9%，15/20 分各 0.5%。
+TREASURE_VALUES: tuple[int, ...] = (*range(1, 11), 15, 20)
+TREASURE_WEIGHTS: tuple[int, ...] = (99,) * 10 + (5, 5)
+
 _INT_RE = re.compile(r"^[+-]?\d+$")
 
 
@@ -219,6 +223,7 @@ class MapModule:
             cells=tuple(cells),
             spent_traps=frozenset(spent),
             mode=mode,
+            treasure_cells=remaining,
         )
 
     # -------------------------------------------------------------- txt 读取
@@ -229,7 +234,7 @@ class MapModule:
 
         格式：首行 ``height width``；随后 ``height`` 行、每行 ``width`` 个整数；
         再两行 ``A row col`` 与 ``B row col``。
-        单格语义：``0`` 空地、``1`` 墙（**只有 1 是墙**）、``>=2`` 宝藏分值、``<0`` 陷阱扣分。
+        单格语义：``0`` 空地、``1`` 墙、``+1`` 为 1 分宝藏、``>=2`` 宝藏分值、``<0`` 陷阱扣分。
 
         语法/维度/出生点/连通非法抛 :class:`MapFormatError`；文件不存在等 I/O 错误透传 ``OSError``。
         """
@@ -251,9 +256,18 @@ class MapModule:
             )
 
         grid = [_parse_int_tokens(lines[1 + row], width, f"第 {row + 1} 行") for row in range(height)]
+        one_point_treasures = frozenset(
+            Position(row, col)
+            for row in range(height)
+            for col, token in enumerate(lines[1 + row].split())
+            if token.startswith("+") and grid[row][col] == 1
+        )
         pos_a = _parse_birth_point(lines[height + 1], "A")
         pos_b = _parse_birth_point(lines[height + 2], "B")
-        return MapModule._assemble(height, width, grid, pos_a, pos_b, source=str(path))
+        return MapModule._assemble(
+            height, width, grid, pos_a, pos_b, source=str(path),
+            one_point_treasures=one_point_treasures,
+        )
 
     @staticmethod
     def _assemble(
@@ -263,6 +277,7 @@ class MapModule:
         pos_a: Position,
         pos_b: Position,
         source: str = "",
+        one_point_treasures: frozenset[Position] = frozenset(),
     ) -> tuple[TrueMap, Position, Position]:
         terrain: list[tuple[int, ...]] = []
         treasures: dict[Position, int] = {}
@@ -272,7 +287,10 @@ class MapModule:
             for col in range(width):
                 value = grid[row][col]
                 pos = Position(row, col)
-                if value == WALL:  # 1：墙（D1：只有 1 是墙）
+                if pos in one_point_treasures:  # +1：宝藏，区别于墙 1
+                    terrain_row.append(EMPTY)
+                    treasures[pos] = 1
+                elif value == WALL:  # 1：墙
                     terrain_row.append(WALL)
                 elif value > WALL:  # >= 2：宝藏分值
                     terrain_row.append(EMPTY)
@@ -318,13 +336,13 @@ class MapModule:
 
         lines = [f"{current_map.height} {current_map.width}"]
         for row in range(current_map.height):
-            values: list[int] = []
+            values: list[int | str] = []
             for col in range(current_map.width):
                 pos = Position(row, col)
                 if current_map.terrain[row][col] == WALL:
                     values.append(WALL)
                 elif pos in treasures:
-                    values.append(treasures[pos])
+                    values.append("+1" if treasures[pos] == 1 else treasures[pos])
                 elif pos in traps:
                     values.append(traps[pos])
                 else:
@@ -340,6 +358,11 @@ class MapModule:
     # ---------------------------------------------------------------- 随机生成
 
     @staticmethod
+    def draw_treasure_value(rng: random.Random) -> int:
+        """使用注入的 RNG 抽取宝藏分值：1–10 分各 9.9%，15/20 分各 0.5%。"""
+        return rng.choices(TREASURE_VALUES, weights=TREASURE_WEIGHTS, k=1)[0]
+
+    @staticmethod
     def generate(
         height: int,
         width: int,
@@ -347,7 +370,7 @@ class MapModule:
         treasures: int,
         traps: int,
         rng: random.Random,
-        treasure_value: int = 2,
+        treasure_value: int | None = None,
         trap_value: int = -2,
         max_attempts: int = 1000,
     ) -> tuple[TrueMap, Position, Position]:
@@ -357,6 +380,7 @@ class MapModule:
         分值不合规、``max_attempts <= 0``）抛 ``ValueError``；
         重试 ``max_attempts`` 次仍不满足"非墙格与 A 全连通且出生点不重合"抛 :class:`MapGenerationError`。
         只用传入的 ``rng``，同 seed 同参数结果完全可复现（含两个出生点）。
+        默认每枚宝藏独立按概率抽取分值；显式传入 ``treasure_value`` 时使用固定分值。
         """
         MapModule._validate_generate_args(
             height, width, walls, treasures, traps, rng, treasure_value, trap_value, max_attempts
@@ -381,7 +405,7 @@ class MapModule:
         treasures: int,
         traps: int,
         rng: random.Random,
-        treasure_value: int,
+        treasure_value: int | None,
         trap_value: int,
         max_attempts: int,
     ) -> None:
@@ -395,6 +419,8 @@ class MapModule:
             ("trap_value", trap_value),
             ("max_attempts", max_attempts),
         ):
+            if name == "treasure_value" and value is None:
+                continue
             if isinstance(value, bool) or not isinstance(value, int):
                 raise ValueError(f"{name} 必须为整数，收到 {value!r}")
         if height <= 0 or width <= 0:
@@ -409,8 +435,8 @@ class MapModule:
                 f"地图容量不足：{height}×{width}={height * width} 格 < 2 个出生点 + {walls} 墙 + "
                 f"{treasures} 宝藏 + {traps} 陷阱 = {needed} 格"
             )
-        if treasure_value < 2:
-            raise ValueError(f"宝藏分值必须 >= 2（1 已被墙占用，D1），收到 {treasure_value}")
+        if treasure_value is not None and treasure_value < 1:
+            raise ValueError(f"宝藏分值必须 >= 1，收到 {treasure_value}")
         if trap_value > -1:
             raise ValueError(f"陷阱扣分必须 <= -1，收到 {trap_value}")
         if max_attempts <= 0:
@@ -426,7 +452,7 @@ class MapModule:
         treasures: int,
         traps: int,
         rng: random.Random,
-        treasure_value: int,
+        treasure_value: int | None,
         trap_value: int,
     ) -> tuple[TrueMap, Position, Position] | None:
         """单次随机尝试；非墙格与 A 不全连通时返回 ``None`` 触发重试。"""
@@ -450,7 +476,10 @@ class MapModule:
             height,
             width,
             terrain,
-            {pos: treasure_value for pos in treasure_cells},
+            {
+                pos: MapModule.draw_treasure_value(rng) if treasure_value is None else treasure_value
+                for pos in treasure_cells
+            },
             {pos: trap_value for pos in trap_cells},
         )
         reachable = PathModule.bfs_distances(true_map, pos_a)

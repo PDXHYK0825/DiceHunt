@@ -515,7 +515,7 @@ def test_map_constructor_rejects_illegal_structures() -> None:
     with pytest.raises(MapFormatError):
         TrueMap.from_grid([[0, 1.5]])  # 非整数
     with pytest.raises(ValueError):
-        TrueMap.create(2, 2, [[0, 0], [0, 0]], treasures={Position(0, 0): 1})  # 宝藏值必须 >= 2
+        TrueMap.create(2, 2, [[0, 0], [0, 0]], treasures={Position(0, 0): 0})  # 宝藏值必须 >= 1
     with pytest.raises(ValueError):
         TrueMap.create(2, 2, [[0, 0], [0, 0]], traps={Position(0, 0): 0})  # 陷阱值必须 <= -1
     with pytest.raises(ValueError):

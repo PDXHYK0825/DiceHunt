@@ -255,6 +255,19 @@ def test_console_bad_dice_is_rejected() -> None:
             io.next_action(Seat.A, bad, view, _public_view(view))
 
 
+def test_console_board_distinguishes_one_point_treasure_from_wall() -> None:
+    true_map = TrueMap.create(
+        3, 4, ((0, 0, 1, 0), (0, 0, 0, 0), (0, 0, 0, 0)),
+        {Position(0, 1): 1, Position(0, 3): 15, Position(1, 1): 20},
+    )
+    view = MapModule(true_map).get_view_map(GameMode.NORMAL)
+    out = StringIO()
+    ConsoleIO(stdout=out, save_log=False).render_board(view, _public_view(view))
+    rows = out.getvalue().splitlines()
+    assert rows[1].split() == ["0", "A", "1", "#", "15"]
+    assert rows[2].split() == ["1", ".", "20", ".", "."]
+
+
 def test_console_render_shows_board_and_keeps_hard_traps_hidden() -> None:
     true_map = TrueMap.from_grid([[0, 0, 2], [0, -2, 0], [0, 0, 0]])
     out = StringIO()
