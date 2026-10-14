@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DiceHunt · 对战地图寻宝</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-icon">⚄</span><div><strong>DiceHunt</strong><span>对战地图寻宝策略分析平台</span></div></div>
+    <div class="connection"><i></i><span id="connection">正在连接游戏</span><span class="web-tag">WEB</span></div>
+  </header>
+  <main class="workspace">
+    <aside class="panel settings">
+      <div class="section-title"><span class="eyebrow">01 / SETUP</span><h1>创建你的地图</h1><p>选择布局，开始一场寻宝对决。</p></div>
+      <form id="map-form">
+        <div class="field-grid">
+          <label>高度<input name="height" type="number" min="1" max="64" value="8" required></label>
+          <label>宽度<input name="width" type="number" min="1" max="64" value="8" required></label>
+          <label>障碍物<input name="walls" type="number" min="0" max="4096" value="8" required></label>
+          <label>宝藏<input name="treasures" type="number" min="0" max="4096" value="3" required></label>
+          <label>陷阱<input name="traps" type="number" min="0" max="4096" value="2" required></label>
+          <label>随机种子<input name="seed" type="number" value="42"></label>
+        </div>
+        <button class="button dark full" id="generate" type="submit">↻ 生成新地图</button>
+      </form>
+      <div class="divider"></div>
+      <label class="field-label" for="mode">游戏模式</label>
+      <select id="mode"><option value="EASY">简单 · 贪心 AI</option><option value="NORMAL" selected>普通 · OPT 最优 AI</option><option value="HARD">困难 · 隐藏陷阱</option></select>
+      <p class="mode-note" id="mode-note">地图信息全部可见，与 OPT 最优 AI 对战。</p>
+      <button class="button primary full" id="start-human">开始人机对战 <span>→</span></button>
+      <button class="button secondary full" id="start-machine">机器对机器演示</button>
+      <button class="button quiet full" id="stop" disabled>中止当前对局</button>
+      <div class="divider"></div>
+      <label class="toggle"><input id="animation" type="checkbox" checked><span>骰子与移动动画</span></label>
+      <label class="toggle"><input id="popups" type="checkbox" checked><span>事件弹窗提示</span></label>
+      <div class="spawn-note"><span>↖ A</span><p>新地图的出生点固定在<br><strong>左上角与右下角</strong></p><span>B ↘</span></div>
+    </aside>
+
+    <section class="panel map-panel">
+      <div class="map-heading"><div><span class="eyebrow">02 / PLAYGROUND</span><h2>寻宝地图 <span id="map-size">8 × 8</span></h2></div><span class="pill" id="mode-pill">普通模式</span></div>
+      <div class="map-tools"><span id="map-help">点击格子编辑地图</span><div><button class="text-button" id="load">↑ 读取地图</button><button class="text-button" id="save">↓ 保存地图</button></div></div>
+      <input type="file" id="map-file" accept=".txt,text/plain" hidden>
+      <div class="board-container"><div id="board" class="board" role="grid" aria-label="寻宝地图"></div></div>
+      <div class="legend"><span><i class="legend-a">A</i>玩家 A</span><span><i class="legend-b">B</i>玩家 B</span><span><i class="legend-wall"></i>障碍物</span><span><i class="legend-treasure">◆</i>宝藏</span><span><i class="legend-trap">!</i>陷阱</span></div>
+      <div class="map-footer"><span id="remaining">剩余宝藏 3 枚</span><span>宝藏拾取完即结束对局</span></div>
+    </section>
+
+    <aside class="game-column">
+      <section class="panel status-panel">
+        <div class="status-heading"><span class="eyebrow">03 / LIVE MATCH</span><span class="pill neutral" id="phase">等待开始</span></div>
+        <div class="score-grid"><div class="score-card player-a"><div><span class="seat">A</span><span id="label-a">人类</span></div><strong id="score-a">0</strong><small>当前得分</small></div><div class="score-card player-b"><div><span class="seat">B</span><span id="label-b">OPT 最优 AI</span></div><strong id="score-b">0</strong><small>当前得分</small></div></div>
+        <div class="dice-area"><button id="dice" class="dice" aria-label="点击骰子投点" disabled><span id="dice-face" class="dice-face"></span></button><div><span id="round" class="eyebrow">准备开始</span><h3 id="dice-title">等待投骰</h3><p id="dice-hint">开始对局后，点击骰子。</p></div></div>
+        <div class="steps-bar"><span>剩余有效步数</span><strong id="steps">—</strong></div>
+      </section>
+      <section class="panel input-panel">
+        <div class="input-heading"><h2>移动指令</h2><span>W / A / S / D</span></div>
+        <div class="direction-pad"><button data-direction="w" aria-label="向上">↑</button><button data-direction="a" aria-label="向左">←</button><button data-direction="s" aria-label="向下">↓</button><button data-direction="d" aria-label="向右">→</button></div>
+        <form id="action-form"><label class="sr-only" for="action">输入移动指令</label><input id="action" autocomplete="off" placeholder="例如：d d s end" disabled><div class="action-buttons"><button class="button dark" id="submit" type="submit" disabled>执行指令</button><button class="button secondary" id="end-turn" type="button" disabled>结束回合</button></div></form>
+        <p class="input-hint" id="input-hint" role="status">轮到人类时，先点击骰子再移动。</p>
+      </section>
+      <section class="panel log-panel"><div class="log-heading"><h2>对局记录</h2><button id="report" class="text-button" disabled>↓ 导出报告</button></div><div id="logs" class="logs" aria-label="对局记录"><p class="empty-log">每一步探索，都会在这里留下记录。</p></div></section>
+    </aside>
+  </main>
+  <footer class="page-footer">投骰 · 探索 · 博弈 <span>DiceHunt / 本地游戏</span></footer>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <dialog id="result-dialog"><span class="eyebrow">MATCH COMPLETE</span><h2 id="result-title">对局结束</h2><p id="result-text"></p><button class="button primary full" id="result-close">返回地图</button></dialog>
+</body>
+</html>

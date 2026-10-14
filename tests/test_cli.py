@@ -402,7 +402,8 @@ def test_human_vs_ai_three_modes_end_to_end(choice: str, tmp_path: pathlib.Path)
             import treasure_game.ai_module  # noqa: F401
         except Exception:  # noqa: BLE001
             pytest.skip("ai_module 尚未落地")
-    stdin_text = "end\n" * 60 + "0\n"
+    # 固定角落出生点后，提供足够覆盖整局回合上限的人工输入，避免提前 EOF 中止。
+    stdin_text = "end\n" * 500 + "0\n"
     code, out = run_cli(
         ["--choice", choice, "--seed", "11", "--log-dir", str(tmp_path)],
         stdin_text=stdin_text,

@@ -189,6 +189,8 @@ class Frame:
     view: ViewMap
     state_view: PublicStateView
     events: tuple[GameEvent, ...] = ()
+    roll_dice: bool = True
+    manual_dice: bool = False
 
 
 def is_available() -> bool:
@@ -291,8 +293,15 @@ class GuiIO:
         self.transcript: list[str] = []
         self.render_calls = 0
         self.aborted = False
+        self._roll_pending = False
+        self._manual_dice = False
 
     # ------------------------------------------------------------------ GameIO
+    def start_turn(self, seat: Seat, dice_N: int, human: bool) -> None:
+        """只在真实回合投骰；脚本化人工座位无需点击。"""
+        self._roll_pending = True
+        self._manual_dice = human and self._script is None
+
     def render(
         self,
         view: ViewMap,
@@ -314,7 +323,11 @@ class GuiIO:
             view=view,
             state_view=state_view,
             events=tuple(events),
+            roll_dice=self._roll_pending,
+            manual_dice=self._manual_dice,
         )
+        self._roll_pending = False
+        self._manual_dice = False
         self.frames.append(frame)
         # 界面侧日志（对照 ConsoleIO.render 的文本记录）：只记"每帧公开状态"这一行，
         # 事件本身由 GameResult.events 权威记录，避免报告里重复两遍。
@@ -543,7 +556,7 @@ class GameController:
         return target
 
     def set_cell(self, row: int, col: int, value: int, *, treasure: bool = False) -> str:
-        """编辑格子；``treasure=True`` 可设置 1 分宝藏。出生点不允许改成墙。"""
+        """编辑格子；``treasure=True`` 可设置 1 分宝藏。出生点必须保持空地。"""
         if self._grid is None:
             raise IllegalStateError("尚未加载地图：请先生成或读取地图再编辑")
         if not (0 <= row < len(self._grid) and 0 <= col < len(self._grid[0])):
@@ -551,8 +564,8 @@ class GameController:
         if type(value) is not int:
             raise ValueError(f"格值必须是 int，收到 {type(value).__name__}")
         pos = Position(row, col)
-        if value == 1 and not treasure and pos in (self.pos_a, self.pos_b):
-            raise ValueError(f"出生点 ({row}, {col}) 不能改成障碍物")
+        if (value != 0 or treasure) and pos in (self.pos_a, self.pos_b):
+            raise ValueError(f"出生点 ({row}, {col}) 必须保持空地")
         grid = self.grid
         grid[row][col] = value
         current_map, _, _ = self.require_map()
@@ -839,8 +852,8 @@ def __getattr__(name: str) -> typing.Any:
 def _build_qt_classes() -> dict[str, type]:
     """导入 PyQt6 并定义 ``BoardWidget`` / ``MainWindow``（只在函数内 import，保证延迟）。"""
     try:
-        from PyQt6.QtCore import QEventLoop, Qt, QTimer, pyqtSignal
-        from PyQt6.QtGui import QColor, QFont
+        from PyQt6.QtCore import QEventLoop, QRectF, Qt, QTimer, pyqtSignal
+        from PyQt6.QtGui import QColor, QFont, QPainter, QPen
         from PyQt6.QtWidgets import (
             QAbstractItemView,
             QApplication,
@@ -873,6 +886,47 @@ def _build_qt_classes() -> dict[str, type]:
     _COLOR_A = QColor("#bcd8ff")
     _COLOR_B = QColor("#c8f0c8")
     _COLOR_BLOCKED = QColor("#ffd0d0")
+
+    class DiceButton(QPushButton):
+        """可点击的骰子：旋转骰面并绘制真实点数。"""
+
+        def __init__(self, parent: QWidget) -> None:
+            super().__init__(parent)
+            self.face = 0
+            self.angle = 0
+            self.setFixedSize(96, 96)
+            self.setAccessibleName("点击骰子投点")
+            self.setToolTip("轮到人类时，点击骰子投点")
+            self.setEnabled(False)
+
+        def set_face(self, face: int, angle: int = 0) -> None:
+            self.face, self.angle = face, angle
+            self.update()
+
+        def paintEvent(self, event: typing.Any) -> None:  # noqa: N802
+            painter = QPainter(self)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.translate(self.width() / 2, self.height() / 2)
+            painter.rotate(self.angle)
+            painter.setPen(QPen(QColor("#2563eb" if self.isEnabled() else "#64748b"), 2))
+            painter.setBrush(QColor("#eff6ff" if self.isEnabled() else "#ffffff"))
+            painter.drawRoundedRect(QRectF(-28, -28, 56, 56), 10, 10)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#1e293b"))
+            points = {
+                1: [(0, 0)],
+                2: [(-15, -15), (15, 15)],
+                3: [(-15, -15), (0, 0), (15, 15)],
+                4: [(-15, -15), (15, -15), (-15, 15), (15, 15)],
+                5: [(-15, -15), (15, -15), (0, 0), (-15, 15), (15, 15)],
+                6: [(x, y) for x in (-15, 15) for y in (-15, 0, 15)],
+            }
+            for x, y in points.get(self.face, []):
+                painter.drawEllipse(QRectF(x - 4, y - 4, 8, 8))
+            if self.face == 0:
+                painter.setPen(QColor("#2563eb"))
+                painter.setFont(QFont("Segoe UI", 24))
+                painter.drawText(QRectF(-28, -28, 56, 56), Qt.AlignmentFlag.AlignCenter, "?")
 
     class BoardWidget(QTableWidget):
         """棋盘控件：**只**从 ``ViewMap`` 取格值（真值对象在类型上进不来）。
@@ -1089,13 +1143,16 @@ def _build_qt_classes() -> dict[str, type]:
             self._awaiting_dice: int | None = None
             self._pending_action: tuple[Direction, ...] | None = None
             self._action_loop: QEventLoop | None = None
+            self._dice_loop: QEventLoop | None = None
+            self._dice_state: PublicStateView | None = None
+            self._dice_aborted = False
             self._ai_factory_backup = self.controller.ai_factory
 
             self._build_ui(params)
             self._append_log("欢迎使用对战地图寻宝策略分析平台（GUI）。")
             self._append_log(
                 "操作：先「一键随机生成地图」或「读取 txt 地图」，选择模式后点「开始对局」；"
-                "轮到人工座位时在输入框键入 w/a/s/d（空格分隔）或 end，点「执行指令」。"
+                "轮到人工座位时先点击骰子，再输入 w/a/s/d（空格分隔）或 end，点「执行指令」。"
             )
             self._set_input_enabled(False)
             if self.controller.loaded:  # pragma: no cover - 供注入 controller 的场景
@@ -1203,6 +1260,9 @@ def _build_qt_classes() -> dict[str, type]:
             layout = QVBoxLayout(box)
             self.turn_label = QLabel("第 - 回合｜等待开始", box)
             self.dice_label = QLabel("骰子：-", box)
+            self.dice_button = DiceButton(box)
+            self.dice_button.clicked.connect(self.on_roll_dice)
+            layout.addWidget(self.dice_button, alignment=Qt.AlignmentFlag.AlignHCenter)
             self.score_label = QLabel("比分：A = 0｜B = 0", box)
             self.steps_label = QLabel("本回合剩余有效步数：-/-", box)
             self.last_turn_label = QLabel("上一回合：（尚未开始）", box)
@@ -1454,8 +1514,12 @@ def _build_qt_classes() -> dict[str, type]:
             return result
 
         def on_abort(self) -> None:
-            """中止对局：仅在正等待人工输入时生效（受控中止，不产生假胜负）。"""
-            if self._action_loop is not None:
+            """中止等待投骰或等待人工输入的对局，不产生假胜负。"""
+            if self._dice_loop is not None:
+                self._dice_aborted = True
+                self._dice_loop.quit()
+                self._set_status("已请求中止对局……")
+            elif self._action_loop is not None:
                 self._pending_action = None
                 self._action_loop.quit()
                 self._set_status("已请求中止对局……")
@@ -1464,6 +1528,7 @@ def _build_qt_classes() -> dict[str, type]:
 
         def _begin_game(self) -> None:
             self._game_running = True
+            self._dice_aborted = False
             self.frames.clear()
             self.popups.clear()
             self.battle_count = 0
@@ -1477,6 +1542,8 @@ def _build_qt_classes() -> dict[str, type]:
             self._action_loop = None
             self._pending_action = None
             self._awaiting_dice = None
+            self._dice_state = None
+            self.dice_button.setEnabled(False)
             self._set_input_enabled(False)
             self._set_game_controls_enabled(True)
 
@@ -1503,7 +1570,8 @@ def _build_qt_classes() -> dict[str, type]:
             self.controller.set_mode(state_view.mode)
             self.turn_label.setText(
                 f"第 {state_view.turn_index + 1} 回合｜轮到 "
-                f"{self._seat_name(state_view.turn)}｜骰子 N = {state_view.dice_N}"
+                f"{self._seat_name(state_view.turn)}｜"
+                + ("等待点击骰子" if frame.manual_dice else f"骰子 N = {state_view.dice_N}")
             )
             self.score_label.setText(
                 f"比分：A（{self.seat_labels.get(Seat.A, 'A')}）= {state_view.score_a}｜"
@@ -1513,13 +1581,26 @@ def _build_qt_classes() -> dict[str, type]:
                 f"剩余宝藏：{state_view.remaining_treasure_count}｜模式："
                 f"{MODE_LABELS[state_view.mode]}"
             )
-            self._awaiting_dice = state_view.dice_N
-            self.steps_label.setText(self._steps_text(state_view.dice_N, 0))
+            self._awaiting_dice = None if frame.manual_dice else state_view.dice_N
+            self.steps_label.setText(
+                "本回合剩余有效步数：-/-" if frame.manual_dice else self._steps_text(state_view.dice_N, 0)
+            )
+            if frame.manual_dice:
+                self.dice_label.setText("点击骰子投点")
+                self.dice_button.set_face(0)
             self._update_last_turn_label(frame)
             self._dispatch_events(frame.events)
             # 先画静态格值（不含令牌），再由动画把令牌逐格移到本帧位置（最后一步落到终态）。
             self.board.set_frame(frame.view)
             self._animate(frame)
+            if frame.roll_dice and frame.manual_dice and not self._closing:
+                self._dice_state = state_view
+                self._dice_loop = QEventLoop(self)
+                self.dice_button.setEnabled(True)
+                self._dice_loop.exec()
+                self._dice_loop = None
+                self._dice_state = None
+                self.dice_button.setEnabled(False)
 
         def append_log(self, message: str) -> None:
             """文本日志（``GameIO.log`` 通道）。"""
@@ -1656,16 +1737,6 @@ def _build_qt_classes() -> dict[str, type]:
         def _build_animation_plan(self, frame: Frame) -> tuple[list[typing.Callable[[], None]], list[str]]:
             steps: list[typing.Callable[[], None]] = []
             names: list[str] = []
-            dice_N = frame.state_view.dice_N
-            for tick in range(3):  # 骰子滚动 3 帧后定格
-                face = self._roll_face(dice_N) if tick < 2 else dice_N
-
-                def show_dice(value: int = face) -> None:
-                    self.dice_rolls.append(value)
-                    self.dice_label.setText(f"骰子：{value}")
-
-                steps.append(show_dice)
-                names.append(f"DICE:{face}")
             for event in frame.events:
                 if event.kind == GameEvent.MOVE and event.position is not None:
                     if event.actor is not None:
@@ -1674,13 +1745,53 @@ def _build_qt_classes() -> dict[str, type]:
                 elif event.kind == GameEvent.BLOCKED and event.actor is not None:
                     steps.append(self._blocked_step(event))
                     names.append(f"BLOCK:{event.actor.value}")
+            if frame.roll_dice and not frame.manual_dice:
+                dice_steps, dice_names = self._dice_animation_plan(frame.state_view)
+                steps.extend(dice_steps)
+                names.extend(dice_names)
             def settle() -> None:
                 self.board.set_tokens(frame.state_view.pos_a, frame.state_view.pos_b)
-                self.dice_label.setText(f"骰子：{dice_N}")
 
             steps.append(settle)
             names.append("SETTLE")
             return steps, names
+
+        def _dice_animation_plan(
+            self, state_view: PublicStateView
+        ) -> tuple[list[typing.Callable[[], None]], list[str]]:
+            steps: list[typing.Callable[[], None]] = []
+            names: list[str] = []
+            for tick in range(10):
+                final = tick == 9
+                face = state_view.dice_N if final else self._roll_face(state_view.dice_N)
+                angle = 0 if final else tick * 40
+
+                def show_dice(value: int = face, rotation: int = angle, done: bool = final) -> None:
+                    self.dice_rolls.append(value)
+                    self.dice_button.set_face(value, rotation)
+                    self.dice_label.setText(f"骰子：{value}" if done else "骰子旋转中……")
+                    if done:
+                        self._awaiting_dice = state_view.dice_N
+                        self.steps_label.setText(self._steps_text(state_view.dice_N, 0))
+                        self.turn_label.setText(
+                            f"第 {state_view.turn_index + 1} 回合｜轮到 "
+                            f"{self._seat_name(state_view.turn)}｜骰子 N = {state_view.dice_N}"
+                        )
+
+                steps.append(show_dice)
+                names.append(f"DICE:{face}")
+            return steps, names
+
+        def on_roll_dice(self) -> None:
+            """人类每回合只能点击一次；动画结束后才进入移动输入。"""
+            if self._dice_state is None or not self.dice_button.isEnabled():
+                return
+            self.dice_button.setEnabled(False)
+            steps, names = self._dice_animation_plan(self._dice_state)
+            self.animation_steps.extend(names)
+            self._play_animation(steps)
+            if self._dice_loop is not None:
+                self._dice_loop.quit()
 
         def _token_step(self, event: GameEvent) -> typing.Callable[[], None]:
             actor = event.actor
@@ -1779,6 +1890,8 @@ def _build_qt_classes() -> dict[str, type]:
             """阻塞式取人工指令（嵌套 ``QEventLoop``）；返回 ``None`` 表示已中止。"""
             if isinstance(view, TrueMap):  # pragma: no cover - 类型上不可能，防御性
                 raise ValueError("人工输入不得接收真值地图")
+            if self._closing or self._dice_aborted:
+                return None
             del view, state_view
             self._pending_action = None
             self._awaiting_dice = dice_N
@@ -1926,6 +2039,9 @@ def _build_qt_classes() -> dict[str, type]:
         # -------------------------------------------------------------- 生命周期
         def closeEvent(self, event: typing.Any) -> None:  # noqa: N802 - Qt 命名
             self._closing = True
+            if self._dice_loop is not None:
+                self._dice_aborted = True
+                self._dice_loop.quit()
             if self._action_loop is not None:
                 self._pending_action = None
                 self._action_loop.quit()

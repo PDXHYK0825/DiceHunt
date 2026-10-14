@@ -724,22 +724,30 @@ def test_interactive_human_input_via_nested_event_loop(make_window, tmp_path: pa
     """真实交互路径：``request_human_action`` 用嵌套事件循环阻塞，QTimer 模拟用户点击。"""
     from PyQt6.QtCore import QTimer
 
-    window = make_window(mode=GameMode.EASY)
+    window = make_window(mode=GameMode.EASY, animation_enabled=True, animation_interval_ms=1)
     window.on_load(_write_map(tmp_path, TINY_MAP))
-    calls = {"n": 0}
+    calls = {"n": 0, "rolls": 0, "moves": 0}
 
     def submit() -> None:
         calls["n"] += 1
         if calls["n"] > 200:  # 兜底：任何异常都不至于让测试永久阻塞
             window.on_abort()
             return
+        if window.dice_button.isEnabled():
+            assert not window.input_edit.isEnabled()
+            assert "等待点击骰子" in window.turn_label.text()
+            assert window.dice_button.face == 0
+            window.dice_button.click()
+            calls["rolls"] += 1
+            return
         if not window.input_edit.isEnabled():
             return
-        if calls["n"] == 1:
+        if calls["moves"] == 0:
             window.input_edit.setText("d")
             window.on_submit_input()
         else:
             window.on_end_turn()
+        calls["moves"] += 1
 
     timer = QTimer(window)
     timer.setInterval(5)
@@ -753,10 +761,50 @@ def test_interactive_human_input_via_nested_event_loop(make_window, tmp_path: pa
     finally:
         timer.stop()
     assert calls["n"] >= 1
+    assert calls["rolls"] >= 1
     assert len(io.requests) >= 1, "人工座位必须通过 request_human_action 取指令"
     assert result.score_a == 2, "第一次交互输入 'd' 必须真实生效"
     assert window._action_loop is None, "对局结束后不得残留事件循环"
     assert not window.input_edit.isEnabled()
+    assert window._dice_loop is None
+
+
+@requires_qt
+def test_dice_animation_runs_once_per_real_machine_turn(make_window, tmp_path):
+    from PyQt6.QtCore import QTimer
+
+    window = make_window(animation_enabled=True, animation_interval_ms=1)
+    window.on_load(_write_map(tmp_path, TINY_MAP))
+    io = gui.GuiIO(sink=window)
+    angles = []
+    timer = QTimer(window)
+    timer.timeout.connect(lambda: angles.append(window.dice_button.angle))
+    timer.start(1)
+    try:
+        result = window.controller.run_machine_vs_machine(
+            io=io, ai=_SpyAI(), max_turns=2, dice_seed_table=(2, 5)
+        )
+    finally:
+        timer.stop()
+    assert window.dice_rolls[9::10] == result.metrics["dice_sequence"]
+    assert len(window.dice_rolls) == 10 * len(result.metrics["dice_sequence"])
+    assert window.dice_button.face == 5 and window.dice_button.angle == 0
+    assert not window.dice_button.isEnabled()
+    assert any(angle != 0 for angle in angles), "定时器播放期间必须实际旋转骰面"
+
+
+@requires_qt
+@pytest.mark.parametrize("close", [False, True])
+def test_waiting_for_dice_can_be_aborted_or_closed(make_window, tmp_path, close):
+    from PyQt6.QtCore import QTimer
+
+    window = make_window()
+    window.on_load(_write_map(tmp_path, TINY_MAP))
+    QTimer.singleShot(10, window.close if close else window.on_abort)
+    assert window.on_start_game() is None
+    assert window._dice_loop is None and window._action_loop is None
+    assert not window.input_edit.isEnabled()
+    assert not window.dice_button.isEnabled()
 
 
 @requires_qt

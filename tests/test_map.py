@@ -133,6 +133,8 @@ def test_generate_counts_birthpoints_and_connectivity():
     assert true_map.map_id  # 静态指纹非空
 
     # 出生点：互不重合、均为空地（非墙且不占资源）
+    assert pos_a == Position(0, 0)
+    assert pos_b == Position(5, 6)
     assert pos_a != pos_b
     for pos in (pos_a, pos_b):
         assert true_map.terrain[pos.row][pos.col] == 0
@@ -250,11 +252,13 @@ def test_generate_exact_fit_one_by_two():
     assert {pos_a, pos_b} == {Position(0, 0), Position(0, 1)}
 
 
-def test_generate_narrow_map_retries_until_connected():
-    """1×8 只有"墙全部贴在两端"才连通（约 7%/次），1000 次重试内必须成功。"""
-    true_map, pos_a, pos_b = MapModule.generate(1, 8, walls=3, treasures=2, traps=1, rng=random.Random(5))
-    assert pos_a != pos_b
+def test_generate_narrow_map_has_fixed_endpoints():
+    true_map, pos_a, pos_b = MapModule.generate(1, 8, walls=0, treasures=2, traps=1, rng=random.Random(5))
+    assert (pos_a, pos_b) == (Position(0, 0), Position(0, 7))
     assert {(pos.row, pos.col) for pos in PathModule.bfs_distances(true_map, pos_a)} == _non_wall_cells(true_map)
+    # 一维地图两端固定为空地后，任何墙都会隔断两个出生点。
+    with pytest.raises(MapGenerationError):
+        MapModule.generate(1, 8, 1, 2, 1, random.Random(5), max_attempts=5)
 
 
 @pytest.mark.parametrize(

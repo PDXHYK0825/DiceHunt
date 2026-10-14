@@ -374,7 +374,7 @@ class MapModule:
         trap_value: int = -2,
         max_attempts: int = 1000,
     ) -> tuple[TrueMap, Position, Position]:
-        """参数化随机生成：打乱坐标分配墙/宝/陷阱/出生点，BFS 校验连通。
+        """参数化随机生成：A 固定左上、B 固定右下，其余坐标随机分配墙/宝/陷阱。
 
         参数非法（数量为负、容量不足即 ``height*width < 2 + walls + treasures + traps``、
         分值不合规、``max_attempts <= 0``）抛 ``ValueError``；
@@ -456,16 +456,20 @@ class MapModule:
         trap_value: int,
     ) -> tuple[TrueMap, Position, Position] | None:
         """单次随机尝试；非墙格与 A 不全连通时返回 ``None`` 触发重试。"""
-        cells = [Position(row, col) for row in range(height) for col in range(width)]
+        pos_a = Position(0, 0)
+        pos_b = Position(height - 1, width - 1)
+        cells = [
+            Position(row, col)
+            for row in range(height)
+            for col in range(width)
+            if Position(row, col) not in (pos_a, pos_b)
+        ]
         rng.shuffle(cells)
 
-        # 打乱后按 墙 → 宝 → 陷阱 → 出生点 A → 出生点 B → 普通空地 的顺序切分坐标，
-        # 因此出生点必然互不重合、且落在既非墙也非资源的空地上。
+        # 两个角落预留为空地，其余坐标按 墙 → 宝 → 陷阱 → 普通空地 切分。
         wall_cells = cells[:walls]
         treasure_cells = cells[walls : walls + treasures]
         trap_cells = cells[walls + treasures : walls + treasures + traps]
-        pos_a = cells[walls + treasures + traps]
-        pos_b = cells[walls + treasures + traps + 1]
 
         wall_set = set(wall_cells)
         terrain = tuple(

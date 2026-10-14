@@ -307,6 +307,9 @@ class Simulator:
                 view = MapModule(state.true_map).get_view_map(mode)
                 state_view = self._public_view(state, seat, round_index, dice_N)
                 if io is not None:
+                    start_turn = getattr(io, "start_turn", None)
+                    if callable(start_turn):
+                        start_turn(seat, dice_N, seat in human_seats)
                     # 固定顺序：先 render（携带上一回合的事件），再 next_action。
                     self._call_render(io, view, state_view, pending)
 
