@@ -201,7 +201,7 @@ class WebGame:
                     payload["treasures"], payload["traps"], seed=payload.get("seed"),
                 )
                 self.logs.clear()
-                self.append_log("已生成地图：A 固定左上角，B 固定右下角。")
+                self.append_log("已生成地图：A、B 出生点随机分布在不同空地上。")
                 self.preview()
             elif route == "/api/map/edit":
                 self.append_log(self.controller.cycle_cell(payload["row"], payload["col"]))

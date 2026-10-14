@@ -133,8 +133,6 @@ def test_generate_counts_birthpoints_and_connectivity():
     assert true_map.map_id  # 静态指纹非空
 
     # 出生点：互不重合、均为空地（非墙且不占资源）
-    assert pos_a == Position(0, 0)
-    assert pos_b == Position(5, 6)
     assert pos_a != pos_b
     for pos in (pos_a, pos_b):
         assert true_map.terrain[pos.row][pos.col] == 0
@@ -158,6 +156,19 @@ def test_generate_is_reproducible_for_same_seed():
     assert map_a.terrain == map_b.terrain
     assert dict(map_a.treasure_values) == dict(map_b.treasure_values)
     assert dict(map_a.trap_values) == dict(map_b.trap_values)
+
+
+def test_generated_birthpoints_vary_across_seeds():
+    births = [
+        MapModule.generate(4, 5, 0, 0, 0, random.Random(seed))[1:]
+        for seed in range(30)
+    ]
+    for seat in (0, 1):
+        positions = {pair[seat] for pair in births}
+        assert len({pos.row for pos in positions}) > 1
+        assert len({pos.col for pos in positions}) > 1
+        assert any(pos not in (Position(0, 0), Position(3, 4)) for pos in positions)
+    assert all(pos_a != pos_b for pos_a, pos_b in births)
 
 
 def test_generate_uses_only_injected_rng(monkeypatch):
@@ -252,13 +263,14 @@ def test_generate_exact_fit_one_by_two():
     assert {pos_a, pos_b} == {Position(0, 0), Position(0, 1)}
 
 
-def test_generate_narrow_map_has_fixed_endpoints():
-    true_map, pos_a, pos_b = MapModule.generate(1, 8, walls=0, treasures=2, traps=1, rng=random.Random(5))
-    assert (pos_a, pos_b) == (Position(0, 0), Position(0, 7))
+@pytest.mark.parametrize("walls", [0, 1])
+def test_generate_narrow_map_has_valid_random_birthpoints(walls):
+    true_map, pos_a, pos_b = MapModule.generate(1, 8, walls=walls, treasures=2, traps=1, rng=random.Random(5))
+    assert pos_a != pos_b
+    for pos in (pos_a, pos_b):
+        assert true_map.terrain[pos.row][pos.col] == 0
+        assert pos not in true_map.treasure_values and pos not in true_map.trap_values
     assert {(pos.row, pos.col) for pos in PathModule.bfs_distances(true_map, pos_a)} == _non_wall_cells(true_map)
-    # 一维地图两端固定为空地后，任何墙都会隔断两个出生点。
-    with pytest.raises(MapGenerationError):
-        MapModule.generate(1, 8, 1, 2, 1, random.Random(5), max_attempts=5)
 
 
 @pytest.mark.parametrize(

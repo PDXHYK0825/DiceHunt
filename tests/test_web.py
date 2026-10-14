@@ -162,14 +162,19 @@ def test_stop_releases_waits_without_report(game, phase):
     assert not final["running"] and not final["report_ready"]
 
 
-def test_map_generation_and_edit_keep_corners_empty(game):
+def test_map_generation_and_edit_keep_random_birthpoints_empty(game):
     state = game.command("/api/map/generate", {
         "height": 5, "width": 7, "walls": 5, "treasures": 4, "traps": 2, "seed": 9,
     })
-    assert state["pos_a"] == [0, 0] and state["pos_b"] == [4, 6]
-    with pytest.raises(ValueError, match="空地"):
-        game.command("/api/map/edit", {"row": 4, "col": 6})
-    assert "A 0 0" in game.download() and "B 4 6" in game.download()
+    assert state["pos_a"] != state["pos_b"]
+    for key in ("pos_a", "pos_b"):
+        row, col = state[key]
+        assert state["cells"][row][col] == 0
+        with pytest.raises(ValueError, match="空地"):
+            game.command("/api/map/edit", {"row": row, "col": col})
+    exported = game.download()
+    assert f"A {state['pos_a'][0]} {state['pos_a'][1]}" in exported
+    assert f"B {state['pos_b'][0]} {state['pos_b'][1]}" in exported
 
 
 def test_http_assets_state_map_export_and_bad_requests(game):
